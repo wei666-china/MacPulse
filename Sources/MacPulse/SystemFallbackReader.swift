@@ -98,6 +98,30 @@ final class SystemFallbackReader {
     }
 
     /// 统一内存分项。口径见 `MemoryBreakdown`。
+    /// 内存吃紧的三个硬信号里,swap 与压力等级要单独从 sysctl 读。
+    /// 全是公开只读接口,无权限要求。
+    func memoryExtras() -> MemorySnapshotExtras {
+        var usage = xsw_usage()
+        var size = MemoryLayout<xsw_usage>.size
+        var swapUsed: UInt64?
+        var swapTotal: UInt64?
+        if sysctlbyname("vm.swapusage", &usage, &size, nil, 0) == 0 {
+            swapUsed = usage.xsu_used
+            swapTotal = usage.xsu_total
+        }
+
+        var level: Int32 = 0
+        var levelSize = MemoryLayout<Int32>.size
+        let pressure = sysctlbyname("kern.memorystatus_vm_pressure_level", &level, &levelSize, nil, 0) == 0
+            ? Int(level) : nil
+
+        return MemorySnapshotExtras(
+            swapUsedBytes: swapUsed,
+            swapTotalBytes: swapTotal,
+            pressureLevel: pressure
+        )
+    }
+
     func memoryBreakdown() -> MemoryBreakdown? {
         var stats = vm_statistics64()
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)

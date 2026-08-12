@@ -20,6 +20,7 @@ struct SoCPanelView: View {
                 gpuCard
                 aneCard
                 powerCard
+                displayCard
                 throughputCard
                 CollectorStatusBanner()
             }
@@ -64,6 +65,40 @@ struct SoCPanelView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// 显示器:分辨率与刷新率,并点名「没跑到这块屏支持的最高刷新率」。
+    /// 外接屏跑不满多半是线或转接头的锅——这正是充电链路那套诊断的视频版。
+    @ViewBuilder
+    private var displayCard: some View {
+        if !model.displays.isEmpty {
+            LiquidCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionHeader(title: "显示器", subtitle: "\(model.displays.count) 块")
+                    ForEach(model.displays) { display in
+                        ValueRow(
+                            title: display.name + (display.isMain ? "(主)" : ""),
+                            value: displayValue(display),
+                            symbol: display.isBuiltIn ? "laptopcomputer" : "display",
+                            tint: display.isBelowMaxRefresh ? MacPulseTheme.warm : .secondary
+                        )
+                    }
+                    if let limited = model.displays.first(where: \.isBelowMaxRefresh),
+                       let max = limited.maxRefreshHz {
+                        Text("「\(limited.name)」当前 \(Int(limited.refreshHz ?? 0))Hz,这块屏在同分辨率下支持到 \(Int(max))Hz。外接屏跑不满通常是线材或转接头带宽不够,换一根支持更高带宽的线可以解决。")
+                            .font(.caption2)
+                            .foregroundStyle(MacPulseTheme.warm)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+    }
+
+    private func displayValue(_ display: DisplayInfo) -> String {
+        let size = "\(display.pixelWidth)×\(display.pixelHeight)"
+        guard let hz = display.refreshHz else { return size }
+        return "\(size) · \(Int(hz))Hz"
     }
 
     private func throttleSymbol(_ kind: ThrottleDiagnosis.Kind) -> String {
@@ -379,10 +414,46 @@ private struct LegendDot: View {
 struct MemoryPanelView: View {
     @EnvironmentObject private var model: DashboardModel
 
+    /// 「我这台机器内存够不够」——判据只看换页量、压缩占比、系统压力等级,
+    /// 不看「已用」:macOS 把闲置内存拿去做缓存,占用高是好事。
+    @ViewBuilder
+    fileprivate var memoryVerdictCard: some View {
+        if let verdict = model.memoryDiagnosis {
+            LiquidCard {
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: verdict.isWarning ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                            .foregroundStyle(verdict.isWarning ? MacPulseTheme.warm : MacPulseTheme.normal)
+                        Text(verdict.summary)
+                            .font(.callout.weight(.semibold))
+                        Spacer(minLength: 0)
+                        if let swap = model.memoryExtras.swapUsedBytes, swap > 0 {
+                            Text("换页 \(MetricFormat.storageBytes(swap))")
+                                .font(.caption.weight(.medium))
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text(verdict.detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let advice = verdict.advice {
+                        Text(advice)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
                 if let memory = model.memory {
+                    memoryVerdictCard
                     breakdownCard(memory)
                     pressureCard(memory)
                 } else {
@@ -818,6 +889,7 @@ struct ThermalPanelView: View {
         ScrollView {
             VStack(spacing: 12) {
                 summaryCard
+                throttleHistoryCard
                 if groups.isEmpty {
                     LiquidCard {
                         Text("温度分组数据暂不可用")
@@ -840,6 +912,43 @@ struct ThermalPanelView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
         }
+    }
+
+    /// 热降频事件历史。瞬时诊断只能回答「现在热不热」,
+    /// 攒成历史才回答「是偶发还是天天如此、都发生在什么时候」。
+    @ViewBuilder
+    private var throttleHistoryCard: some View {
+        let events = model.throttleEvents
+        if !events.isEmpty {
+            LiquidCard {
+                VStack(alignment: .leading, spacing: 9) {
+                    SectionHeader(title: "热降频记录", subtitle: "近 7 天 \(events.count) 次")
+                    Text(throttleHistorySummary(events))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("同一次持续降频只记开头。记录随 App 重启清零,不写入磁盘。")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+
+    /// 找出降频最集中的时段,把「什么时候容易热」说出来。
+    private func throttleHistorySummary(_ events: [Date]) -> String {
+        let calendar = Calendar.current
+        var byHour: [Int: Int] = [:]
+        for event in events {
+            byHour[calendar.component(.hour, from: event), default: 0] += 1
+        }
+        let latest = events.last.map {
+            $0.formatted(.dateTime.month().day().hour().minute())
+        } ?? "—"
+        guard let peak = byHour.max(by: { $0.value < $1.value }), peak.value > 1 else {
+            return "最近一次在 \(latest)。次数还少,看不出规律。"
+        }
+        return "最近一次在 \(latest);出现最多的时段是 \(peak.key) 点前后(\(peak.value) 次)——那个时间你通常在做的事,就是让它发热的事。"
     }
 
     private var summaryCard: some View {

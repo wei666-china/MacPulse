@@ -57,6 +57,12 @@ final class DashboardModel: ObservableObject {
     @Published private(set) var backgroundItems: [BackgroundItem] = []
     /// 最近的睡眠会话(新→旧)。只在电池页可见时读,读取器自带 10 分钟节流。
     @Published private(set) var sleepSessions: [SleepSession] = []
+    /// 内存吃紧判据的额外原料(swap 与系统压力等级)。
+    @Published private(set) var memoryExtras = MemorySnapshotExtras()
+    /// 当前接着的屏幕。只在芯片子页可见时刷新。
+    @Published private(set) var displays: [DisplayInfo] = []
+    /// 近 7 天热降频事件的时间戳。瞬时诊断攒成历史才看得出规律。
+    @Published private(set) var throttleEvents: [Date] = []
     /// 估算器对自己历史预测的准确度自述。
     @Published private(set) var estimateAccuracy = PowerSessionTracker.Accuracy()
     /// 系统网络路径快照。零流量读数，与是否开启测速无关。
@@ -875,6 +881,33 @@ final class DashboardModel: ObservableObject {
         return whole - package
     }
 
+    /// 内存够不够的结论。原料齐了才给,读不到就没有。
+    var memoryDiagnosis: MemoryDiagnosis? {
+        guard let memory else { return nil }
+        return MemoryDiagnosis.diagnose(breakdown: memory, extras: memoryExtras)
+    }
+
+    /// 记录一次热降频事件。同一次持续降频只记开头——
+    /// 每 2 秒记一条会把「一次长时间过热」灌成几百条,规律反而看不见。
+    private func recordThrottleEventIfNeeded() {
+        let verdict = ThrottleDiagnosis.diagnose(.init(
+            clusterActivePercent: current.deep.socCompute?.pClusterActivePercent,
+            clusterFreqMHz: current.deep.socCompute?.pClusterFreqMHz,
+            clusterMaxFreqMHz: current.deep.socCompute?.pClusterMaxFreqMHz,
+            hotspotTemperature: current.deep.hotspotTemperature,
+            thermalLevel: current.deep.thermalLevel,
+            lowPowerModeEnabled: current.deep.lowPowerModeEnabled ?? false,
+            onBattery: current.battery.powerSource == .battery
+        ))
+        guard verdict?.kind == .thermal else { return }
+        let now = Date()
+        // 5 分钟内算同一次事件。
+        if let last = throttleEvents.last, now.timeIntervalSince(last) < 300 { return }
+        throttleEvents.append(now)
+        let cutoff = now.addingTimeInterval(-7 * 86_400)
+        throttleEvents.removeAll { $0 < cutoff }
+    }
+
     /// 睡眠记录后台刷新。读取器内部按 10 分钟节流,这里只管发起,不等结果。
     private func refreshSleepSessions() {
         Task { [weak self] in
@@ -1032,6 +1065,8 @@ final class DashboardModel: ObservableObject {
         // 会随采集器上下线互相顶替，同一时刻的「已用内存」相差约 0.7GB，
         // 界面上表现为重连一次就跳一次。现在只有一个口径。
         memory = fallback.memoryBreakdown()
+        memoryExtras = fallback.memoryExtras()
+        recordThrottleEventIfNeeded()
         if let cores = fallback.perCoreUsage() { perCoreUsage = cores }
         // 只在芯片页可见时扫 ANE 持有者——这是一次 IORegistry 子树遍历，
         // 没人看的时候没有理由跑。
@@ -1053,6 +1088,10 @@ final class DashboardModel: ObservableObject {
         // 磁盘面板同理:只在磁盘子页可见时刷新。
         if visiblePane == .disk {
             diskOverview = DiskStatsReader.read()
+        }
+        // 屏幕信息是 CoreGraphics 直读,便宜,跟着芯片页刷新即可。
+        if visiblePane == .soc {
+            displays = DisplayReader.read()
         }
         // 启动项:launchctl 是子进程,读取走后台线程,主线程不等它。
         if visiblePane == .startup {
