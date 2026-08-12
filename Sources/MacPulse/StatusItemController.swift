@@ -105,7 +105,13 @@ final class StatusItemController: NSObject, NSWindowDelegate {
     /// 深色浅色菜单栏都自动跟随,不需要我们判断外观。
     /// 点数不足或全程零流量时返回 nil,由调用方退回图标——不画一条假的平线。
     static func sparklineImage(from history: [HistoryPoint]) -> NSImage? {
-        let values = history.suffix(40).compactMap { $0.batteryPowerWatts.map(abs) }
+        // 先用电池净功率;满电插电时它恒为 0(初版就卡在这——功能开了却
+        // 永远画不出线),此时退到 SoC 总功耗,那条轨任何供电状态下都在动。
+        let recent = history.suffix(40)
+        var values = recent.compactMap { $0.batteryPowerWatts.map(abs) }
+        if (values.max() ?? 0) <= 0.3 {
+            values = recent.compactMap { $0.systemPowerWatts.map(abs) }
+        }
         guard values.count >= 4 else { return nil }
         let peak = values.max() ?? 0
         guard peak > 0.3 else { return nil }

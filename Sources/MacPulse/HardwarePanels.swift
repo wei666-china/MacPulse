@@ -12,7 +12,8 @@ struct SoCPanelView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
-                if let throttle = throttleDiagnosis {
+                // 空闲时不出现:与总览警示条同一条克制原则,没事就别占屏。
+                if let throttle = throttleDiagnosis, throttle.kind != .idle {
                     throttleCard(throttle)
                 }
                 cpuCard
@@ -740,7 +741,7 @@ struct StartupItemsView: View {
                             title: "后台常驻",
                             subtitle: items.isEmpty ? nil : "\(runningCount) / \(items.count) 在运行"
                         )
-                        Text("这些是第三方装的自启项。苹果自家的系统组件不在此列——它们既动不了也不该动。")
+                        Text("这些是磁盘上 launchd 配置里的第三方自启项。新式 App 通过系统接口注册的登录项不落盘,不在此列——完整清单请看「系统设置 → 通用 → 登录项与扩展」。苹果自家组件已滤除。")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)

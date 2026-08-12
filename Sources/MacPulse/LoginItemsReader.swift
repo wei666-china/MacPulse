@@ -34,7 +34,17 @@ enum LoginItemsReader {
         ("/Library/LaunchDaemons", .daemon)
     ]
 
-    static func read() -> [BackgroundItem] {
+    /// 异步:内部要等 launchctl 子进程,绝不能在主线程上跑。
+    /// (今天下午刚给外设电量修过同款问题,这里一次到位。)
+    static func read() async -> [BackgroundItem] {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(returning: readSynchronously())
+            }
+        }
+    }
+
+    private static func readSynchronously() -> [BackgroundItem] {
         let running = runningLabels()
         var items: [BackgroundItem] = []
 
@@ -85,14 +95,32 @@ enum LoginItemsReader {
         return result
     }
 
-    /// com.microsoft.teams2.agent → Teams2 Agent。推不出好名字就用原标签,
-    /// 不硬造。
+    /// 反向域名标签 → 人话。规则:去掉顶级域段(com/org/net…),
+    /// 丢掉纯数字段,首字母大写,相邻重复词合并。
+    ///
+    /// 初版只取第三段之后,实测把 `com.deskin.session` 变成「Session」——
+    /// 丢了厂商名等于没说;中文标签(闪电说.plist)也要原样保留。
     static func friendlyName(from label: String) -> String {
-        let parts = label.split(separator: ".")
-        guard parts.count >= 3 else { return label }
-        let tail = parts.dropFirst(2)
-            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
-            .joined(separator: " ")
-        return tail.isEmpty ? label : tail
+        let tlds: Set<String> = ["com", "org", "net", "io", "dev", "co", "me", "application"]
+        var parts = label.split(separator: ".").map(String.init)
+        while let first = parts.first, tlds.contains(first.lowercased()) {
+            parts.removeFirst()
+        }
+        // 纯数字段是进程实例号,不是名字的一部分。
+        parts.removeAll { $0.allSatisfy(\.isNumber) }
+        guard !parts.isEmpty else { return label }
+
+        var words: [String] = []
+        for part in parts {
+            let word = part.prefix(1).uppercased() + part.dropFirst()
+            // 「Google GoogleUpdater」这类相邻重复只留一个。
+            if let last = words.last,
+               word.lowercased().hasPrefix(last.lowercased()) || last.lowercased().hasPrefix(word.lowercased()) {
+                if word.count > last.count { words[words.count - 1] = word }
+                continue
+            }
+            words.append(word)
+        }
+        return words.joined(separator: " ")
     }
 }

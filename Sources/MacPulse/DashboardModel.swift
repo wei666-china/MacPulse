@@ -700,7 +700,11 @@ final class DashboardModel: ObservableObject {
             diskOverview = DiskStatsReader.read()
         }
         if pane == .startup {
-            backgroundItems = enrich(LoginItemsReader.read())
+            Task { [weak self] in
+                guard let self else { return }
+                let items = await LoginItemsReader.read()
+                self.backgroundItems = self.enrich(items)
+            }
         }
         restartProcessSampler()
     }
@@ -1033,9 +1037,9 @@ final class DashboardModel: ObservableObject {
         if visiblePane == .disk {
             diskOverview = DiskStatsReader.read()
         }
-        // 启动项:launchctl 子进程调用,同样只在该子页可见时跑。
+        // 启动项:launchctl 是子进程,读取走后台线程,主线程不等它。
         if visiblePane == .startup {
-            backgroundItems = enrich(LoginItemsReader.read())
+            backgroundItems = enrich(await LoginItemsReader.read())
         }
 
         let snapshot = MetricSnapshot(timestamp: .now, battery: battery, deep: deep)

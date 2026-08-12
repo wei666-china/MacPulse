@@ -120,19 +120,31 @@ final class ThrottleDiagnosisTests: XCTestCase {
 
 /// 启动项名称推断(纯字符串逻辑)。
 final class LoginItemNamingTests: XCTestCase {
-    func testFriendlyNameFromLabel() {
-        // 反射式验证放在 App 测试里;这里只固定规则本身的期望,
-        // 与 LoginItemsReader.friendlyName 的实现保持同一约定。
+    /// 规则期望在这里固定,实现同款在 LoginItemsReader.friendlyName。
+    /// 初版丢厂商名(com.deskin.session → 「Session」),实测数据一跑就露怯。
+    func testFriendlyNameKeepsVendorAndDropsNoise() {
         func friendly(_ label: String) -> String {
-            let parts = label.split(separator: ".")
-            guard parts.count >= 3 else { return label }
-            let tail = parts.dropFirst(2)
-                .map { $0.prefix(1).uppercased() + $0.dropFirst() }
-                .joined(separator: " ")
-            return tail.isEmpty ? label : tail
+            let tlds: Set<String> = ["com", "org", "net", "io", "dev", "co", "me", "application"]
+            var parts = label.split(separator: ".").map(String.init)
+            while let first = parts.first, tlds.contains(first.lowercased()) { parts.removeFirst() }
+            parts.removeAll { $0.allSatisfy(\.isNumber) }
+            guard !parts.isEmpty else { return label }
+            var words: [String] = []
+            for part in parts {
+                let word = part.prefix(1).uppercased() + part.dropFirst()
+                if let last = words.last,
+                   word.lowercased().hasPrefix(last.lowercased()) || last.lowercased().hasPrefix(word.lowercased()) {
+                    if word.count > last.count { words[words.count - 1] = word }
+                    continue
+                }
+                words.append(word)
+            }
+            return words.joined(separator: " ")
         }
-        XCTAssertEqual(friendly("com.microsoft.teams2.agent"), "Teams2 Agent")
-        XCTAssertEqual(friendly("com.deskin.session"), "Session")
-        XCTAssertEqual(friendly("shortlabel"), "shortlabel", "推不出好名字就用原标签")
+        XCTAssertEqual(friendly("com.deskin.session"), "Deskin Session", "厂商名不能丢")
+        XCTAssertEqual(friendly("com.microsoft.teams2.agent"), "Microsoft Teams2 Agent")
+        XCTAssertEqual(friendly("com.google.GoogleUpdater.wake"), "GoogleUpdater Wake", "相邻重复词合并")
+        XCTAssertEqual(friendly("application.org.p0deje.Maccy.2628833.2628839"), "P0deje Maccy", "进程实例号不是名字")
+        XCTAssertEqual(friendly("闪电说"), "闪电说", "中文标签原样保留")
     }
 }
