@@ -64,7 +64,17 @@ xcrun actool "$ASSET_WORK" \
 xattr -cr "$APP_PATH"
 # --options runtime 开启强化运行时:库校验挡掉同权限进程的动态库注入。
 # 我们只 dlopen 苹果自签的系统库(libIOReport),不受影响。
-codesign --force --deep --options runtime --sign - "$APP_PATH"
+#
+# 签名身份分两档:
+# - 默认 "-"(ad-hoc):本地自用,零门槛
+# - 设了 MACPULSE_SIGN_IDENTITY(如 "Developer ID Application: ..."):
+#   对外分发档,加可信时间戳,配合下方公证步骤产出「下载即开」的包
+SIGN_IDENTITY="${MACPULSE_SIGN_IDENTITY:--}"
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+  codesign --force --deep --options runtime --sign - "$APP_PATH"
+else
+  codesign --force --deep --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP_PATH"
+fi
 plutil -lint "$APP_PATH/Contents/Info.plist"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
@@ -84,6 +94,32 @@ codesign --verify --deep --strict --verbose=2 "$VERIFY_ROOT/MacPulse.app"
 
 ditto --norsrc "$VERIFY_ROOT/MacPulse.app" "$PROJECT_ROOT/outputs/MacPulse.app"
 xattr -cr "$PROJECT_ROOT/outputs/MacPulse.app"
+
+# 公证(可选):三个环境变量齐了才跑,缺任何一个就静默跳过——
+# 本地日常构建不受影响。凭据用 App Store Connect API 密钥(.p8),
+# 不经手任何密码。公证通过后把票据钉进 App 再重打 zip,
+# 用户离线首启也能过 Gatekeeper。
+if [[ -n "${MACPULSE_NOTARY_KEY_ID:-}" && -n "${MACPULSE_NOTARY_ISSUER:-}" && "$SIGN_IDENTITY" != "-" ]]; then
+  NOTARY_KEY="$HOME/.appstoreconnect/private_keys/AuthKey_${MACPULSE_NOTARY_KEY_ID}.p8"
+  if [[ -f "$NOTARY_KEY" ]]; then
+    print "提交公证(notarytool)……"
+    xcrun notarytool submit "$ZIP_PATH" \
+      --key "$NOTARY_KEY" \
+      --key-id "$MACPULSE_NOTARY_KEY_ID" \
+      --issuer "$MACPULSE_NOTARY_ISSUER" \
+      --wait
+    xcrun stapler staple "$PROJECT_ROOT/outputs/MacPulse.app"
+    (
+      cd "$PROJECT_ROOT/outputs"
+      rm -f "$ZIP_PATH"
+      COPYFILE_DISABLE=1 ditto -c -k --keepParent --norsrc "MacPulse.app" "$ZIP_PATH"
+    )
+    print "公证完成,票据已钉入,zip 已重打。"
+  else
+    print -u2 "缺公证密钥文件:$NOTARY_KEY"
+    exit 1
+  fi
+fi
 
 SOURCE_STAGING="$STAGING_ROOT/MacPulse-Source"
 mkdir -p "$SOURCE_STAGING"
