@@ -433,6 +433,10 @@ struct BatteryView: View {
                     peripheralBatteryCard
                 }
 
+                if let latest = model.sleepSessions.first(where: { $0.onBattery }) {
+                    sleepCard(latest)
+                }
+
                 runtimeEstimateCard
 
                 LiquidCard {
@@ -538,6 +542,53 @@ struct BatteryView: View {
         if cable.eprCapable { parts.append("EPR") }
         if cable.hasCertificationID { parts.append("USB-IF 认证") }
         return parts.joined(separator: " · ")
+    }
+
+    /// 睡眠掉电诊断:合盖那几小时到底掉了多少电、被谁吵醒的。
+    /// 只在有「电池上睡过」的记录时出现——接电睡眠的掉电数据没有意义。
+    private func sleepCard(_ session: SleepSession) -> some View {
+        let diagnosis = SleepDiagnosis.diagnose(session)
+        let recent = model.sleepSessions.filter(\.onBattery).prefix(4)
+        return LiquidCard {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(
+                    title: "睡眠掉电",
+                    subtitle: session.start.formatted(.dateTime.month().day().hour().minute())
+                )
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: diagnosis.isWarning ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(diagnosis.isWarning ? MacPulseTheme.warm : MacPulseTheme.normal)
+                    Text(diagnosis.summary)
+                        .font(.callout.weight(.semibold))
+                    Spacer(minLength: 0)
+                }
+                Text(diagnosis.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if recent.count > 1 {
+                    Divider()
+                    ForEach(Array(recent)) { item in
+                        ValueRow(
+                            title: item.start.formatted(.dateTime.month().day().hour().minute()),
+                            value: sleepRowValue(item),
+                            symbol: "moon.zzz"
+                        )
+                    }
+                    Text("数据来自系统电源日志,掉电量是入睡与醒来时的实测差值。")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+
+    private func sleepRowValue(_ session: SleepSession) -> String {
+        String(
+            format: "%.1fh 掉 %d%% · 唤醒 %d 次",
+            session.hours, max(0, session.droppedPercent), session.darkWakeCount
+        )
     }
 
     /// 蓝牙外设电量。空列表整卡不出现;AirPods 分左/右/盒,普通外设只有主电量。

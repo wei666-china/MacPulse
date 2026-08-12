@@ -55,6 +55,8 @@ final class DashboardModel: ObservableObject {
     @Published private(set) var peripheralBatteries: [PeripheralBattery] = []
     /// 开机/登录自启的后台项。只在启动项子页可见时刷新。
     @Published private(set) var backgroundItems: [BackgroundItem] = []
+    /// 最近的睡眠会话(新→旧)。只在电池页可见时读,读取器自带 10 分钟节流。
+    @Published private(set) var sleepSessions: [SleepSession] = []
     /// 估算器对自己历史预测的准确度自述。
     @Published private(set) var estimateAccuracy = PowerSessionTracker.Accuracy()
     /// 系统网络路径快照。零流量读数，与是否开启测速无关。
@@ -108,6 +110,7 @@ final class DashboardModel: ObservableObject {
     private let batterySampler = BatterySampler()
     private let chargeLinkSampler = ChargeLinkSampler()
     private let peripheralReader = PeripheralBatteryReader()
+    private let sleepReader = SleepLogReader()
     private var batteryPageActive = false
     private var overviewActive = false
     private var isRefreshing = false
@@ -752,6 +755,7 @@ final class DashboardModel: ObservableObject {
             guard let self else { return }
             self.chargeLink = await self.chargeLinkSampler.sample()
             self.peripheralBatteries = await self.peripheralReader.sample()
+            self.sleepSessions = await self.sleepReader.sessions()
         }
     }
 
@@ -1032,6 +1036,7 @@ final class DashboardModel: ObservableObject {
         }
         if batteryPageActive {
             peripheralBatteries = await peripheralReader.sample()
+            sleepSessions = await sleepReader.sessions()
         }
         // 磁盘面板同理:只在磁盘子页可见时刷新。
         if visiblePane == .disk {
