@@ -12,6 +12,9 @@ struct SoCPanelView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
+                if let throttle = throttleDiagnosis {
+                    throttleCard(throttle)
+                }
                 cpuCard
                 gpuCard
                 aneCard
@@ -21,6 +24,54 @@ struct SoCPanelView: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
+        }
+    }
+
+    /// 「机器怎么突然变慢了」。判据用性能集群:它是重活的主力,
+    /// 能效集群本来就常年低频,拿它判会天天误报。
+    private var throttleDiagnosis: ThrottleDiagnosis? {
+        ThrottleDiagnosis.diagnose(.init(
+            clusterActivePercent: deep.socCompute?.pClusterActivePercent,
+            clusterFreqMHz: deep.socCompute?.pClusterFreqMHz,
+            clusterMaxFreqMHz: deep.socCompute?.pClusterMaxFreqMHz,
+            hotspotTemperature: deep.hotspotTemperature,
+            thermalLevel: deep.thermalLevel,
+            lowPowerModeEnabled: deep.lowPowerModeEnabled ?? false,
+            onBattery: model.current.battery.powerSource == .battery
+        ))
+    }
+
+    private func throttleCard(_ diagnosis: ThrottleDiagnosis) -> some View {
+        LiquidCard {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: throttleSymbol(diagnosis.kind))
+                        .foregroundStyle(diagnosis.isWarning ? MacPulseTheme.warm : MacPulseTheme.normal)
+                    Text(diagnosis.summary)
+                        .font(.callout.weight(.semibold))
+                    Spacer(minLength: 0)
+                    if let headroom = diagnosis.frequencyHeadroomPercent {
+                        Text("\(Int(headroom))% 频率")
+                            .font(.caption.weight(.medium))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(diagnosis.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func throttleSymbol(_ kind: ThrottleDiagnosis.Kind) -> String {
+        switch kind {
+        case .fullSpeed: "checkmark.circle.fill"
+        case .thermal: "thermometer.high"
+        case .lowPowerMode: "battery.25percent"
+        case .powerLimit: "bolt.badge.clock"
+        case .idle: "moon.zzz"
         }
     }
 
@@ -668,6 +719,87 @@ private struct DiskLegendItem: View {
                 .foregroundStyle(.secondary)
         }
     }
+}
+
+// MARK: - 启动项
+
+/// 开机/登录自启的后台项,和「它现在是否真在跑、吃多少」对账。
+/// 只读不改:告诉你有什么,删不删是你在系统设置里的决定。
+struct StartupItemsView: View {
+    @EnvironmentObject private var model: DashboardModel
+
+    private var items: [BackgroundItem] { model.backgroundItems }
+    private var runningCount: Int { items.filter(\.isRunning).count }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                LiquidCard {
+                    VStack(alignment: .leading, spacing: 9) {
+                        SectionHeader(
+                            title: "后台常驻",
+                            subtitle: items.isEmpty ? nil : "\(runningCount) / \(items.count) 在运行"
+                        )
+                        Text("这些是第三方装的自启项。苹果自家的系统组件不在此列——它们既动不了也不该动。")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                if items.isEmpty {
+                    LiquidCard {
+                        Text("没有第三方自启项,或正在读取…")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    ForEach(BackgroundItem.Scope.allOrdered, id: \.rawValue) { scope in
+                        let group = items.filter { $0.scope == scope }
+                        if !group.isEmpty {
+                            LiquidCard {
+                                VStack(spacing: 10) {
+                                    SectionHeader(title: scope.rawValue, subtitle: "\(group.count) 项")
+                                    ForEach(group) { item in
+                                        ValueRow(
+                                            title: item.displayName,
+                                            value: statusText(item),
+                                            symbol: item.isRunning ? "circle.fill" : "circle",
+                                            tint: item.isRunning ? MacPulseTheme.normal : .secondary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    LiquidCard {
+                        Text("要停用某一项,请去「系统设置 → 通用 → 登录项与扩展」。MacPulse 只读不改。")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
+    }
+
+    /// 在跑且对上了进程就报真实占用;在跑但对不上(权限或短命进程)只说「运行中」;
+    /// 没跑就说「未运行」——三种状态各自诚实。
+    private func statusText(_ item: BackgroundItem) -> String {
+        guard item.isRunning else { return "未运行" }
+        if let cpu = item.cpuPercent, let memory = item.memoryBytes {
+            return String(format: "%.1f%% · %@", cpu, MetricFormat.bytes(memory))
+        }
+        return "运行中"
+    }
+}
+
+extension BackgroundItem.Scope {
+    static var allOrdered: [BackgroundItem.Scope] { [.userAgent, .systemAgent, .daemon] }
 }
 
 // MARK: - 温度

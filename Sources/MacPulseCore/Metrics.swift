@@ -195,6 +195,8 @@ public struct DeepMetrics: Codable, Sendable, Equatable {
     /// 电源输入功率(SMC PDTR,DC-In)。插电且不充电时约等于整机功耗;
     /// 充电时含充入电池的部分,不能当整机消耗用。
     public var dcInputWatts: Double?
+    /// 系统低电量模式开关状态。节流判定要靠它区分「用户主动省电」与「被迫降频」。
+    public var lowPowerModeEnabled: Bool?
     public var diskReadBytesPerSecond: Double?
     public var diskWriteBytesPerSecond: Double?
     public var networkInBytesPerSecond: Double?
@@ -229,6 +231,7 @@ public struct DeepMetrics: Codable, Sendable, Equatable {
         dramPowerWatts: Double? = nil,
         systemPowerWatts: Double? = nil,
         dcInputWatts: Double? = nil,
+        lowPowerModeEnabled: Bool? = nil,
         diskReadBytesPerSecond: Double? = nil,
         diskWriteBytesPerSecond: Double? = nil,
         networkInBytesPerSecond: Double? = nil,
@@ -256,6 +259,7 @@ public struct DeepMetrics: Codable, Sendable, Equatable {
         self.dramPowerWatts = dramPowerWatts
         self.systemPowerWatts = systemPowerWatts
         self.dcInputWatts = dcInputWatts
+        self.lowPowerModeEnabled = lowPowerModeEnabled
         self.diskReadBytesPerSecond = diskReadBytesPerSecond
         self.diskWriteBytesPerSecond = diskWriteBytesPerSecond
         self.networkInBytesPerSecond = networkInBytesPerSecond
@@ -285,6 +289,7 @@ public struct DeepMetrics: Codable, Sendable, Equatable {
         case dramPowerWatts
         case systemPowerWatts
         case dcInputWatts
+        case lowPowerModeEnabled
         case diskReadBytesPerSecond
         case diskWriteBytesPerSecond
         case networkInBytesPerSecond
@@ -315,6 +320,7 @@ public struct DeepMetrics: Codable, Sendable, Equatable {
         dramPowerWatts = try values.decodeIfPresent(Double.self, forKey: .dramPowerWatts)
         systemPowerWatts = try values.decodeIfPresent(Double.self, forKey: .systemPowerWatts)
         dcInputWatts = try values.decodeIfPresent(Double.self, forKey: .dcInputWatts)
+        lowPowerModeEnabled = try values.decodeIfPresent(Bool.self, forKey: .lowPowerModeEnabled)
         diskReadBytesPerSecond = try values.decodeIfPresent(Double.self, forKey: .diskReadBytesPerSecond)
         diskWriteBytesPerSecond = try values.decodeIfPresent(Double.self, forKey: .diskWriteBytesPerSecond)
         networkInBytesPerSecond = try values.decodeIfPresent(Double.self, forKey: .networkInBytesPerSecond)

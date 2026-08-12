@@ -74,6 +74,13 @@ public final class NativeSoCSampler: @unchecked Sendable {
         tables.gpu.max()
     }
 
+    /// 各集群频率表最高档。节流判定要拿它当分母。
+    /// 三集群机型上 P 行显示的是中核(与采样端映射一致),表也跟着取 sCluster。
+    public var eClusterMaxFrequencyMHz: Double? { tables.eCluster.max() }
+    public var pClusterMaxFrequencyMHz: Double? {
+        tables.sCluster.isEmpty ? tables.pCluster.max() : tables.sCluster.max()
+    }
+
     /// 阻塞采样一个窗口。IOReport 都拿不到时返回 nil(上游会走 degraded)。
     public func sample(windowSeconds: Double) -> NativeSoCSample? {
         guard let window = ioReport?.sample(windowSeconds: windowSeconds) else { return nil }

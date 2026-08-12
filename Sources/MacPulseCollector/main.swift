@@ -109,6 +109,9 @@ private enum MacPulseCollector {
         let sampler = NativeSoCSampler()
         let throughput = ThroughputReader()
         let chip = ChipInfoReader.read(gpuMaxFrequencyMHz: sampler.gpuMaxFrequencyMHz)
+        // 频率表是机器常量,循环外读一次即可。
+        let eClusterMaxFreq = sampler.eClusterMaxFrequencyMHz.map { Int($0.rounded()) }
+        let pClusterMaxFreq = sampler.pClusterMaxFrequencyMHz.map { Int($0.rounded()) }
         let fanCount = sampler.fanCount
 
         let configuredParentPID = ProcessInfo.processInfo.environment["MACPULSE_PARENT_PID"]
@@ -177,6 +180,7 @@ private enum MacPulseCollector {
                 dramPowerWatts: MetricMath.nonNegative(soc.dramPowerWatts),
                 systemPowerWatts: MetricMath.nonNegative(soc.totalPowerWatts),
                 dcInputWatts: MetricMath.nonNegative(soc.dcInputPowerWatts),
+                lowPowerModeEnabled: ProcessInfo.processInfo.isLowPowerModeEnabled,
                 diskReadBytesPerSecond: MetricMath.nonNegative(rates.diskReadBytesPerSecond),
                 diskWriteBytesPerSecond: MetricMath.nonNegative(rates.diskWriteBytesPerSecond),
                 networkInBytesPerSecond: MetricMath.nonNegative(rates.networkInBytesPerSecond),
@@ -189,6 +193,8 @@ private enum MacPulseCollector {
                 socCompute: SoCComputeMetrics(
                     eClusterActivePercent: validPercent(soc.eClusterActivePercent),
                     eClusterFreqMHz: positiveInt(soc.eClusterFreqMHz.map { Int($0.rounded()) }),
+                    eClusterMaxFreqMHz: positiveInt(eClusterMaxFreq),
+                    pClusterMaxFreqMHz: positiveInt(pClusterMaxFreq),
                     pClusterActivePercent: validPercent(soc.pClusterActivePercent),
                     pClusterFreqMHz: positiveInt(soc.pClusterFreqMHz.map { Int($0.rounded()) }),
                     gpuFreqMHz: positiveInt(soc.gpuFreqMHz.map { Int($0.rounded()) }),

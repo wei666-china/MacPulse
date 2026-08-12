@@ -17,6 +17,7 @@ enum PerformancePane: String, CaseIterable, Identifiable, Sendable {
     case soc = "芯片"
     case memory = "内存"
     case disk = "磁盘"
+    case startup = "启动项"
     case thermal = "温度"
     case processes = "进程"
 
@@ -52,6 +53,8 @@ final class DashboardModel: ObservableObject {
     @Published private(set) var diskOverview: DiskOverview?
     /// 蓝牙外设电量。空数组 = 确实没有带电量上报的外设(如实隐藏卡片)。
     @Published private(set) var peripheralBatteries: [PeripheralBattery] = []
+    /// 开机/登录自启的后台项。只在启动项子页可见时刷新。
+    @Published private(set) var backgroundItems: [BackgroundItem] = []
     /// 估算器对自己历史预测的准确度自述。
     @Published private(set) var estimateAccuracy = PowerSessionTracker.Accuracy()
     /// 系统网络路径快照。零流量读数，与是否开启测速无关。
@@ -696,6 +699,9 @@ final class DashboardModel: ObservableObject {
         if pane == .disk {
             diskOverview = DiskStatsReader.read()
         }
+        if pane == .startup {
+            backgroundItems = enrich(LoginItemsReader.read())
+        }
         restartProcessSampler()
     }
 
@@ -861,6 +867,24 @@ final class DashboardModel: ObservableObject {
         return whole - package
     }
 
+    /// 把启动项与进程采样结果对账:能配上 PID 的填真实占用,
+    /// 配不上的留空——「在跑」和「吃多少」是两件事,不硬凑。
+    private func enrich(_ items: [BackgroundItem]) -> [BackgroundItem] {
+        var byPID: [Int32: ProcessGroupSnapshot] = [:]
+        for group in processGroups {
+            byPID[group.primaryPID] = group
+            for child in group.children { byPID[child.pid] = group }
+        }
+        return items.map { item in
+            var copy = item
+            if let pid = item.pid, let group = byPID[pid] {
+                copy.cpuPercent = group.smoothedCPUPercent ?? group.cpuPercent
+                copy.memoryBytes = group.physicalFootprintBytes
+            }
+            return copy
+        }
+    }
+
     /// 设置页出现或 App 回到前台时重查通知权限。
     /// 旧版只在启动时查一次:用户去系统设置授了权回来,App 还显示「已关闭」,
     /// 且提醒因为同一个陈旧缓存被静默丢弃——绿灯坏灯都可能是假的。
@@ -1008,6 +1032,10 @@ final class DashboardModel: ObservableObject {
         // 磁盘面板同理:只在磁盘子页可见时刷新。
         if visiblePane == .disk {
             diskOverview = DiskStatsReader.read()
+        }
+        // 启动项:launchctl 子进程调用,同样只在该子页可见时跑。
+        if visiblePane == .startup {
+            backgroundItems = enrich(LoginItemsReader.read())
         }
 
         let snapshot = MetricSnapshot(timestamp: .now, battery: battery, deep: deep)

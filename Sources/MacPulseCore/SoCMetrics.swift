@@ -33,6 +33,9 @@ public struct SoCComputeMetrics: Codable, Sendable, Equatable {
     public var pClusterActivePercent: Double?
     public var pClusterFreqMHz: Int?
     public var gpuFreqMHz: Int?
+    /// 各集群频率表里的最高档(pmgr voltage-states)。用来判断「满载却跑不满」。
+    public var eClusterMaxFreqMHz: Int?
+    public var pClusterMaxFreqMHz: Int?
     /// 神经引擎活跃度。**0 表示空闲，是真读数**，不要当成缺失。
     public var aneActivePercent: Double?
     public var dramReadGBs: Double?
@@ -43,6 +46,8 @@ public struct SoCComputeMetrics: Codable, Sendable, Equatable {
     public init(
         eClusterActivePercent: Double? = nil,
         eClusterFreqMHz: Int? = nil,
+        eClusterMaxFreqMHz: Int? = nil,
+        pClusterMaxFreqMHz: Int? = nil,
         pClusterActivePercent: Double? = nil,
         pClusterFreqMHz: Int? = nil,
         gpuFreqMHz: Int? = nil,
@@ -54,6 +59,8 @@ public struct SoCComputeMetrics: Codable, Sendable, Equatable {
     ) {
         self.eClusterActivePercent = eClusterActivePercent
         self.eClusterFreqMHz = eClusterFreqMHz
+        self.eClusterMaxFreqMHz = eClusterMaxFreqMHz
+        self.pClusterMaxFreqMHz = pClusterMaxFreqMHz
         self.pClusterActivePercent = pClusterActivePercent
         self.pClusterFreqMHz = pClusterFreqMHz
         self.gpuFreqMHz = gpuFreqMHz

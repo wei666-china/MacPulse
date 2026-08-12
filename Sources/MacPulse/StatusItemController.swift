@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import MacPulseCore
 import SwiftUI
 
 /// 自建菜单栏项 + 完全自持的玻璃浮窗。
@@ -70,10 +71,18 @@ final class StatusItemController: NSObject, NSWindowDelegate {
         let defaults = UserDefaults.standard
         let mode = defaults.string(forKey: "menuBarDisplayMode") ?? MenuBarDisplayMode.standard.rawValue
 
-        button.image = NSImage(
-            systemSymbolName: model.menuBarSymbol,
-            accessibilityDescription: model.menuBarAccessibilityLabel
-        )
+        // 迷你走势图:开了就用最近的实时功率画一条 28×16 的火花线代替图标,
+        // 一眼看出「刚才是不是有个尖峰」。关了走系统符号。
+        if defaults.bool(forKey: "menuBarSparkline"),
+           let spark = Self.sparklineImage(from: model.liveHistory) {
+            button.image = spark
+        } else {
+            button.image = NSImage(
+                systemSymbolName: model.menuBarSymbol,
+                accessibilityDescription: model.menuBarAccessibilityLabel
+            )
+        }
+        button.image?.accessibilityDescription = model.menuBarAccessibilityLabel
         button.imagePosition = mode == MenuBarDisplayMode.iconOnly.rawValue ? .imageOnly : .imageLeading
 
         if mode == MenuBarDisplayMode.iconOnly.rawValue {
@@ -88,6 +97,40 @@ final class StatusItemController: NSObject, NSWindowDelegate {
             )
             button.title = " " + text
         }
+    }
+
+    // MARK: - 迷你走势图
+
+    /// 用最近的电池净功率画一条火花线。模板图(isTemplate)交给系统上色,
+    /// 深色浅色菜单栏都自动跟随,不需要我们判断外观。
+    /// 点数不足或全程零流量时返回 nil,由调用方退回图标——不画一条假的平线。
+    static func sparklineImage(from history: [HistoryPoint]) -> NSImage? {
+        let values = history.suffix(40).compactMap { $0.batteryPowerWatts.map(abs) }
+        guard values.count >= 4 else { return nil }
+        let peak = values.max() ?? 0
+        guard peak > 0.3 else { return nil }
+
+        let size = NSSize(width: 28, height: 16)
+        let image = NSImage(size: size, flipped: false) { rect in
+            let path = NSBezierPath()
+            path.lineWidth = 1.4
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            let inset: CGFloat = 2
+            let usableH = rect.height - inset * 2
+            let stepX = rect.width / CGFloat(max(1, values.count - 1))
+            for (index, value) in values.enumerated() {
+                let x = CGFloat(index) * stepX
+                let y = inset + CGFloat(value / peak) * usableH
+                let point = NSPoint(x: x, y: y)
+                if index == 0 { path.move(to: point) } else { path.line(to: point) }
+            }
+            NSColor.black.setStroke()
+            path.stroke()
+            return true
+        }
+        image.isTemplate = true
+        return image
     }
 
     // MARK: - 浮窗开合

@@ -28,6 +28,8 @@ struct PerformanceView: View {
                     MemoryPanelView()
                 case .disk:
                     DiskPanelView()
+                case .startup:
+                    StartupItemsView()
                 case .thermal:
                     ThermalPanelView()
                 case .processes:

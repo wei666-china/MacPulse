@@ -956,6 +956,7 @@ struct SettingsView: View {
     @AppStorage("alertCooldownMinutes") private var alertCooldownMinutes = 60.0
     @AppStorage("menuBarDisplayMode") private var menuBarDisplayMode = MenuBarDisplayMode.standard.rawValue
     @AppStorage("menuBarMetrics") private var menuBarMetrics = MenuBarMetric.defaultStorage
+    @AppStorage("menuBarSparkline") private var menuBarSparkline = false
     @AppStorage("processMonitoringEnabled") private var processMonitoringEnabled = true
     @AppStorage("processHistoryEnabled") private var processHistoryEnabled = true
     @AppStorage("networkAutoRun") private var networkAutoRun = true
@@ -1027,6 +1028,9 @@ struct SettingsView: View {
                         }
                         if menuBarDisplayMode != MenuBarDisplayMode.iconOnly.rawValue {
                             menuBarMetricToggles
+                        }
+                        Toggle(isOn: $menuBarSparkline) {
+                            settingLabel("菜单栏走势图", "用最近功率的火花线代替图标", "waveform.path.ecg")
                         }
                         Divider()
                         Toggle(isOn: $launchAtLogin) {
