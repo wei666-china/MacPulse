@@ -980,7 +980,9 @@ final class DashboardModel: ObservableObject {
             missing.append("睡眠掉电(近期没有电池睡眠记录)")
         }
 
-        // 存储
+        // 存储。没逛过磁盘页时数据是空的——必须说出来,
+        // 否则读者会把「报告里没提存储」当成「存储没问题」。
+        if diskOverview == nil { missing.append("存储(打开性能→磁盘页后重新生成)") }
         if let root = diskOverview?.volumes.first(where: \.isRoot) {
             let freeRatio = Double(root.availableBytes) / Double(max(1, root.totalBytes))
             items.append(.init(
@@ -991,7 +993,8 @@ final class DashboardModel: ObservableObject {
             ))
         }
 
-        // 自启项
+        // 自启项。同上:没逛过启动项页就没有数据。
+        if backgroundItems.isEmpty { missing.append("开机自启(打开性能→启动项页后重新生成)") }
         if !backgroundItems.isEmpty {
             let running = backgroundItems.filter(\.isRunning).count
             items.append(.init(
@@ -1002,7 +1005,8 @@ final class DashboardModel: ObservableObject {
             ))
         }
 
-        // 显示器
+        // 显示器。外接屏跑不满才是问题,内置屏自适应刷新不算。
+        if displays.isEmpty { missing.append("显示器(打开性能→芯片页后重新生成)") }
         if let limited = displays.first(where: \.isBelowMaxRefresh), let max = limited.maxRefreshHz {
             items.append(.init(
                 level: .notice,
@@ -1182,7 +1186,6 @@ final class DashboardModel: ObservableObject {
         // 界面上表现为重连一次就跳一次。现在只有一个口径。
         memory = fallback.memoryBreakdown()
         memoryExtras = fallback.memoryExtras()
-        recordThrottleEventIfNeeded()
         if let cores = fallback.perCoreUsage() { perCoreUsage = cores }
         // 只在芯片页可见时扫 ANE 持有者——这是一次 IORegistry 子树遍历，
         // 没人看的时候没有理由跑。
@@ -1216,6 +1219,8 @@ final class DashboardModel: ObservableObject {
 
         let snapshot = MetricSnapshot(timestamp: .now, battery: battery, deep: deep)
         current = snapshot
+        // 必须在 current 更新之后判:放在前面读到的是上一拍的旧快照。
+        recordThrottleEventIfNeeded()
         updateRuntimeEstimate(snapshot)
         isLoading = false
         notifications.evaluate(snapshot)

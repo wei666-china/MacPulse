@@ -16,8 +16,12 @@ struct DisplayInfo: Identifiable, Sendable, Equatable {
     let isMain: Bool
 
     /// 没跑到自己支持的最高刷新率(留 1Hz 容差,避免 59.97 vs 60 的浮点噪声)。
+    ///
+    /// **只判外接屏**:ProMotion 机型的内置屏空闲时本来就会降到 60Hz 甚至更低,
+    /// 那是自适应刷新在省电,不是故障。对内置屏喊「没跑满、换根线」既错误又荒唐——
+    /// 内置屏根本没有线可换。
     var isBelowMaxRefresh: Bool {
-        guard let refreshHz, let maxRefreshHz else { return false }
+        guard !isBuiltIn, let refreshHz, let maxRefreshHz else { return false }
         return maxRefreshHz - refreshHz > 1
     }
 }
