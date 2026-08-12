@@ -62,7 +62,9 @@ xcrun actool "$ASSET_WORK" \
 # Finder metadata and resource forks are not part of the signed bundle. If they
 # are added before or during archiving, macOS rejects the ad-hoc signature.
 xattr -cr "$APP_PATH"
-codesign --force --deep --sign - "$APP_PATH"
+# --options runtime 开启强化运行时:库校验挡掉同权限进程的动态库注入。
+# 我们只 dlopen 苹果自签的系统库(libIOReport),不受影响。
+codesign --force --deep --options runtime --sign - "$APP_PATH"
 plutil -lint "$APP_PATH/Contents/Info.plist"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
