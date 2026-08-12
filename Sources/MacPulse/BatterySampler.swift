@@ -34,6 +34,9 @@ actor BatterySampler {
     /// 几天都不变的值。实测 CycleCount 隔了好几天两次读都是 15。
     private struct SlowValues: Sendable {
         var rawMaxCapacity: Int?
+        /// 苹果算「最大容量」用的标称值。健康度必须用它,
+        /// 用 AppleRawMaxCapacity 会比系统设置低一两个点(见 BatteryReader 注释)。
+        var nominalMaxCapacity: Int?
         var designCapacity: Int?
         var cycleCount: Int?
         var adapterRatedWatts: Double?
@@ -108,12 +111,12 @@ actor BatterySampler {
                 numberValue(fast["Temperature"]).map { $0.doubleValue / 100 }
             ),
             healthPercent: MetricMath.healthPercent(
-                maxCapacity: slow?.rawMaxCapacity.map(NSNumber.init(value:)),
+                maxCapacity: (slow?.nominalMaxCapacity ?? slow?.rawMaxCapacity).map(NSNumber.init(value:)),
                 designCapacity: slow?.designCapacity.map(NSNumber.init(value:))
             ),
             cycleCount: slow?.cycleCount,
             currentCapacityMAh: rawCurrent?.intValue,
-            maxCapacityMAh: slow?.rawMaxCapacity,
+            maxCapacityMAh: slow?.nominalMaxCapacity ?? slow?.rawMaxCapacity,
             designCapacityMAh: slow?.designCapacity,
             // 只作对照，绝不直接显示。`IOPSGetTimeRemainingEstimate` 本身是单次
             // 调用，不像 `IOPSCopyPowerSourcesInfo` 那样拷贝整份字典，放在快档
@@ -135,6 +138,7 @@ actor BatterySampler {
         }
 
         let rawMax = property(service, "AppleRawMaxCapacity") ?? property(service, "MaxCapacity")
+        let nominalMax = property(service, "NominalChargeCapacity")
         let design = property(service, "DesignCapacity")
         let cycles = property(service, "CycleCount")
 
@@ -157,6 +161,7 @@ actor BatterySampler {
             // Apple Silicon 上 MaxCapacity 是常数 100（百分比），拿它当 mAh
             // 会把健康度算成 1.7%。只接受看起来像 mAh 的值。
             rawMaxCapacity: rawMax.flatMap { $0.intValue > 200 ? $0.intValue : nil },
+            nominalMaxCapacity: nominalMax.flatMap { $0.intValue > 200 ? $0.intValue : nil },
             designCapacity: design?.intValue,
             cycleCount: cycles?.intValue,
             adapterRatedWatts: adapterWatts,

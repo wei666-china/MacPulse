@@ -41,6 +41,13 @@ enum BatteryReader {
         // 会渲染出「健康度 1%、最大容量 100 mAh」。≤200 一律不当 mAh 用。
         let rawMax = (number(dictionary["AppleRawMaxCapacity"]) ?? number(dictionary["MaxCapacity"]))
             .flatMap { $0.doubleValue > 200 ? $0 : nil }
+        // 健康度的分子必须用 NominalChargeCapacity,不能用 AppleRawMaxCapacity。
+        // 后者是电量计的**瞬时原始估计**,随温度与最近充放电波动;前者是苹果
+        // 自己算「最大容量」用的标称值。实测本机(20 次循环、几乎全新):
+        // raw 5711/5760 = 99% ,而系统设置里明明写着 100% ——
+        // 我们的数字和用户能自查的权威来源打架,这种账必须对上。
+        let nominalMax = number(dictionary["NominalChargeCapacity"])
+            .flatMap { $0.doubleValue > 200 ? $0 : nil } ?? rawMax
         let rawCurrent = number(dictionary["AppleRawCurrentCapacity"])
         let design = number(dictionary["DesignCapacity"])
         let temperatureRaw = number(dictionary["Temperature"])?.doubleValue
@@ -74,10 +81,10 @@ enum BatteryReader {
             netPowerWatts: netPowerWatts,
             adapterRatedWatts: adapterRatedWatts,
             temperatureCelsius: MetricMath.validTemperature(temperatureRaw.map { $0 / 100 }),
-            healthPercent: MetricMath.healthPercent(maxCapacity: rawMax, designCapacity: design),
+            healthPercent: MetricMath.healthPercent(maxCapacity: nominalMax, designCapacity: design),
             cycleCount: number(dictionary["CycleCount"])?.intValue,
             currentCapacityMAh: rawCurrent?.intValue,
-            maxCapacityMAh: rawMax?.intValue,
+            maxCapacityMAh: nominalMax?.intValue,
             designCapacityMAh: design?.intValue,
             timeRemainingMinutes: powerSources.timeRemainingMinutes,
             // 计量芯片自己的估计，就躺在同一个字典里，此前从未被读过。

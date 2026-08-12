@@ -93,3 +93,39 @@ final class BatterySamplerTests: XCTestCase {
         XCTAssertNotNil(final, "300 轮之后仍应可读")
     }
 }
+
+/// 电池健康度真值对账。这项一直没对过账,结果读错了字段:
+/// 用 AppleRawMaxCapacity(电量计瞬时估计)算出 99%,而系统设置里写着 100%。
+/// 我们的数字必须和用户能自己查到的权威来源对得上。
+final class BatteryHealthAuditTests: XCTestCase {
+    private func shell(_ command: String) -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", command]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    func testHealthMatchesSystemProfiler() async throws {
+        let metrics = await BatterySampler().sample() ?? BatteryReader.read()
+        guard let health = metrics.healthPercent else {
+            throw XCTSkip("本机读不到电池健康度")
+        }
+        // 真值:system_profiler 的 Maximum Capacity(与系统设置同一个数)。
+        let output = shell("system_profiler SPPowerDataType | grep -A 4 'Health Information' | grep 'Maximum Capacity'")
+        guard let range = output.range(of: #"\d+"#, options: .regularExpression),
+              let systemValue = Double(output[range]) else {
+            throw XCTSkip("system_profiler 没给出最大容量")
+        }
+        // 苹果自己也是取整显示,允许 1 个百分点的取整差。
+        XCTAssertEqual(
+            health.rounded(), systemValue, accuracy: 1,
+            "健康度 \(health)% 与系统设置的 \(systemValue)% 对不上——多半又拿错了分子字段"
+        )
+    }
+}
