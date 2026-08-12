@@ -40,10 +40,18 @@ actor SleepLogReader {
         process.waitUntilExit()
         guard let text = String(data: data, encoding: .utf8) else { return [] }
 
-        // 只保留最近 14 天:更早的记录对「我的机器现在怎么样」没有参考价值,
-        // 也省得把十万行全喂给解析器。
+        // 只保留最近 14 天。先按日期**字符串前缀**粗筛再解析:
+        // 日志有十几万行,对每行都跑一次 DateFormatter 是纯浪费,
+        // 而 yyyy-MM-dd 是可直接比大小的字典序。
         let cutoff = Date().addingTimeInterval(-14 * 86_400)
-        let sessions = SleepLogParser.parse(lines: text.components(separatedBy: "\n"))
-        return sessions.filter { $0.start >= cutoff }.sorted { $0.start > $1.start }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let cutoffPrefix = formatter.string(from: cutoff)
+
+        let lines = text.components(separatedBy: "\n").filter { line in
+            line.count > 10 && String(line.prefix(10)) >= cutoffPrefix
+        }
+        return SleepLogParser.parse(lines: lines).sorted { $0.start > $1.start }
     }
 }

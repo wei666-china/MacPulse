@@ -755,8 +755,8 @@ final class DashboardModel: ObservableObject {
             guard let self else { return }
             self.chargeLink = await self.chargeLinkSampler.sample()
             self.peripheralBatteries = await self.peripheralReader.sample()
-            self.sleepSessions = await self.sleepReader.sessions()
         }
+        refreshSleepSessions()
     }
 
     func setProcessMonitoringEnabled(_ enabled: Bool) {
@@ -873,6 +873,15 @@ final class DashboardModel: ObservableObject {
               whole >= package
         else { return nil }
         return whole - package
+    }
+
+    /// 睡眠记录后台刷新。读取器内部按 10 分钟节流,这里只管发起,不等结果。
+    private func refreshSleepSessions() {
+        Task { [weak self] in
+            guard let self else { return }
+            let sessions = await self.sleepReader.sessions()
+            self.sleepSessions = sessions
+        }
     }
 
     /// 把启动项与进程采样结果对账:能配上 PID 的填真实占用,
@@ -1036,7 +1045,10 @@ final class DashboardModel: ObservableObject {
         }
         if batteryPageActive {
             peripheralBatteries = await peripheralReader.sample()
-            sleepSessions = await sleepReader.sessions()
+            // 睡眠日志绝不能在这里 await:pmset 光是吐 13 万行就要 6 秒,
+            // 而 refresh 全程持着重入闸——等它等于让所有实时数字冻住六到九秒。
+            // 甩给独立任务,读取器自带 10 分钟节流,不会重复触发。
+            refreshSleepSessions()
         }
         // 磁盘面板同理:只在磁盘子页可见时刷新。
         if visiblePane == .disk {
