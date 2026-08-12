@@ -1,0 +1,888 @@
+import AppKit
+import MacPulseCore
+import SwiftUI
+
+// MARK: - 芯片
+
+struct SoCPanelView: View {
+    @EnvironmentObject private var model: DashboardModel
+
+    private var deep: DeepMetrics { model.current.deep }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                cpuCard
+                gpuCard
+                aneCard
+                powerCard
+                throughputCard
+                CollectorStatusBanner()
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
+    }
+
+    private var cpuCard: some View {
+        LiquidCard {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionHeader(
+                    title: deep.chip?.name ?? "CPU",
+                    subtitle: deep.chip?.coreLayoutDescription
+                )
+                ClusterRow(
+                    name: "能效集群",
+                    activePercent: deep.socCompute?.eClusterActivePercent,
+                    freqMHz: deep.socCompute?.eClusterFreqMHz,
+                    color: MacPulseTheme.violet
+                )
+                ClusterRow(
+                    name: "性能集群",
+                    activePercent: deep.socCompute?.pClusterActivePercent,
+                    freqMHz: deep.socCompute?.pClusterFreqMHz,
+                    color: MacPulseTheme.plugged
+                )
+                if !model.perCoreUsage.isEmpty {
+                    Divider()
+                    PerCoreBars(
+                        usage: model.perCoreUsage,
+                        eCoreCount: deep.chip?.eCoreCount
+                    )
+                }
+            }
+        }
+    }
+
+    private var gpuCard: some View {
+        LiquidCard {
+            VStack(alignment: .leading, spacing: 11) {
+                SectionHeader(
+                    title: "GPU",
+                    subtitle: deep.chip?.gpuCoreCount.map { "\($0) 核" }
+                )
+                ValueRow(
+                    title: "占用",
+                    value: MetricFormat.percent(deep.gpuUsagePercent),
+                    symbol: "square.3.layers.3d",
+                    tint: .cyan
+                )
+                ValueRow(
+                    title: "频率",
+                    value: deep.socCompute?.gpuFreqMHz.map { "\($0) MHz" } ?? "不可用",
+                    symbol: "metronome"
+                )
+                ValueRow(
+                    title: "温度",
+                    value: MetricFormat.temperature(deep.gpuTemperature),
+                    symbol: "thermometer.medium"
+                )
+                if let fp32 = deep.chip?.tflopsFP32, let fp16 = deep.chip?.tflopsFP16 {
+                    // 这是规格推算值（核数 × 最高频率），不是实测算力。
+                    // 不标「理论峰值」就会被当成当前吞吐读。
+                    Text(String(format: "理论峰值 FP32 %.2f TFLOPs · FP16 %.2f TFLOPs", fp32, fp16))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var aneCard: some View {
+        LiquidCard {
+            VStack(alignment: .leading, spacing: 11) {
+                SectionHeader(title: "神经引擎", subtitle: aneStateTitle)
+                ValueRow(
+                    title: "功耗",
+                    value: MetricFormat.watts(deep.anePowerWatts),
+                    symbol: "bolt.fill",
+                    tint: .pink
+                )
+                // 「活跃度」行已删:原生迁移后该通道无来源,恒显「不可用」,
+                // 与标题栏的「空闲/工作中」三行打架。状态由功率单独驱动,
+                // 依据写在下面的边界说明里。
+
+                if let holders = model.aneHolderNames {
+                    Divider()
+                    if holders.isEmpty {
+                        Text("当前没有 App 打开神经引擎")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("正在占用：\(holders.joined(separator: "、"))")
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    // 这句是本页最重要的一行文案：说清仪器的边界在哪。
+                    Text("macOS 不提供按进程的神经引擎用量，这里只显示当前持有 ANE 会话的 App。")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    /// ANE 功率为 0 是**空闲**，是真读数，不是缺失。状态只看功率——
+    /// 活跃度通道在原生路径上没有来源,不能参与判断。
+    private var aneStateTitle: String? {
+        guard let watts = deep.anePowerWatts else { return nil }
+        return watts <= 0.001 ? "空闲" : "工作中"
+    }
+
+    private var powerCard: some View {
+        LiquidCard {
+            VStack(spacing: 13) {
+                SectionHeader(title: "功耗", subtitle: "实时")
+                // 五档墨阶,深→浅:青/粉/薄荷是单色化的漏网彩条(审计高危)。
+                // GPU 行并入 GPU-SRAM:残差的减数含它,不并的话
+                // 「各行相加 ≠ 总数」恰好打脸下面那句脚注。
+                PowerRailRow(name: "CPU", watts: deep.cpuPowerWatts, color: .primary.opacity(0.85), maxWatts: powerScale)
+                PowerRailRow(name: "GPU(含 SRAM)", watts: gpuRailWatts, color: .primary.opacity(0.65), maxWatts: powerScale)
+                PowerRailRow(name: "神经引擎", watts: deep.anePowerWatts, color: .primary.opacity(0.48), maxWatts: powerScale)
+                PowerRailRow(name: "统一内存", watts: deep.dramPowerWatts, color: .primary.opacity(0.32), maxWatts: powerScale)
+                PowerRailRow(
+                    name: "其他（未细分）",
+                    watts: deep.socPower?.residualWatts,
+                    color: .primary.opacity(0.18),
+                    maxWatts: powerScale
+                )
+                Text("「其他」= SoC 总功耗减去上列各项。它来自能量模型内部，无法断言具体构成。")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Divider()
+                ValueRow(
+                    title: "SoC 总功耗",
+                    value: MetricFormat.watts(deep.socPower?.packageWatts ?? deep.systemPowerWatts),
+                    symbol: "cpu",
+                    tint: .blue
+                )
+                ValueRow(
+                    title: "整机功耗",
+                    value: model.wholeMachineWattsText,
+                    symbol: "desktopcomputer",
+                    tint: .indigo
+                )
+                ValueRow(
+                    title: "屏幕与外设",
+                    value: MetricFormat.watts(model.nonSoCWatts),
+                    symbol: "display",
+                    tint: .orange
+                )
+            }
+        }
+    }
+
+    private var throughputCard: some View {
+        LiquidCard {
+            VStack(spacing: 12) {
+                SectionHeader(title: "数据吞吐")
+                ValueRow(title: "网络下载", value: MetricFormat.rate(deep.networkInBytesPerSecond), symbol: "arrow.down.circle", tint: .green)
+                ValueRow(title: "网络上传", value: MetricFormat.rate(deep.networkOutBytesPerSecond), symbol: "arrow.up.circle", tint: .blue)
+                ValueRow(title: "磁盘读取", value: MetricFormat.rate(deep.diskReadBytesPerSecond), symbol: "internaldrive")
+                ValueRow(title: "磁盘写入", value: MetricFormat.rate(deep.diskWriteBytesPerSecond), symbol: "square.and.arrow.down")
+                ValueRow(
+                    title: "内存带宽",
+                    value: MetricFormat.value(
+                        MetricFormat.gigabytesPerSecond(deep.socCompute?.dramReadGBs, deep.socCompute?.dramWriteGBs),
+                        available: deep.socCompute?.dramReadGBs != nil,
+                        unsupported: deep.isUnsupported(SensorAvailabilityKey.dramBandwidth)
+                    ),
+                    symbol: "arrow.left.arrow.right"
+                )
+            }
+        }
+    }
+
+    /// GPU 核心轨 + GPU-SRAM 轨。任一有值就有值,两个都缺才是缺。
+    private var gpuRailWatts: Double? {
+        let parts = [deep.gpuPowerWatts, deep.socPower?.gpuSRAMWatts].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.reduce(0, +)
+    }
+
+    /// 条的满刻度用封装总功耗:旧版用「最大的那条轨」,最大轨永远顶满,
+    /// 紧邻的「SoC 总功耗」又诱导人把条读成占比——现在它就是占比。
+    private var powerScale: Double {
+        if let package = deep.socPower?.packageWatts, package > 0 {
+            return package
+        }
+        let rails = [
+            gpuRailWatts,
+            deep.cpuPowerWatts,
+            deep.anePowerWatts,
+            deep.dramPowerWatts,
+            deep.socPower?.residualWatts
+        ].compactMap { $0 }
+        return max(5, rails.max() ?? 5)
+    }
+}
+
+private struct ClusterRow: View {
+    let name: String
+    let activePercent: Double?
+    let freqMHz: Int?
+    let color: Color
+
+    var body: some View {
+        VStack(spacing: 5) {
+            HStack {
+                Text(name)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(MetricFormat.percent(activePercent))
+                    .font(.callout.weight(.semibold))
+                    .monospacedDigit()
+                Text(freqMHz.map { "\($0) MHz" } ?? "—")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .frame(width: 78, alignment: .trailing)
+            }
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.primary.opacity(0.07))
+                    if let activePercent {
+                        Capsule()
+                            .fill(LinearGradient(colors: [color.opacity(0.55), color], startPoint: .leading, endPoint: .trailing))
+                            .frame(width: proxy.size.width * min(max(activePercent / 100, 0), 1))
+                    } else {
+                        Capsule()
+                            .strokeBorder(.primary.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    }
+                }
+            }
+            .frame(height: 6)
+        }
+    }
+}
+
+/// 每核占用柱状图。
+///
+/// 用一个 `Canvas` 画完所有柱子，而不是 N 个 `GeometryReader` + `Capsule`：
+/// 这些柱子在 `.glassEffect()` 卡片内部，每 2 秒刷新一次，逐元素的视图树
+/// 重建代价远高于一次 Canvas 重绘。
+private struct PerCoreBars: View {
+    let usage: [Double]
+    let eCoreCount: Int?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("每核占用")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Canvas { context, size in
+                guard !usage.isEmpty else { return }
+                let pitch = size.width / CGFloat(usage.count)
+                let barWidth = min(26, pitch * 0.62)
+                for (index, value) in usage.enumerated() {
+                    let fraction = min(max(value / 100, 0), 1)
+                    let height = max(2, size.height * fraction)
+                    let x = pitch * CGFloat(index) + (pitch - barWidth) / 2
+                    let rect = CGRect(x: x, y: size.height - height, width: barWidth, height: height)
+                    let isEfficiency = eCoreCount.map { index < $0 } ?? false
+                    context.fill(
+                        Path(roundedRect: rect, cornerRadius: barWidth / 2.6),
+                        with: .color(isEfficiency ? MacPulseTheme.violet : MacPulseTheme.plugged)
+                    )
+                    // 轨道底色，让空闲核也看得见位置
+                    let track = CGRect(x: x, y: 0, width: barWidth, height: size.height)
+                    context.stroke(
+                        Path(roundedRect: track, cornerRadius: barWidth / 2.6),
+                        with: .color(.primary.opacity(0.06)),
+                        lineWidth: 1
+                    )
+                }
+            }
+            .frame(height: 44)
+
+            if let eCoreCount, eCoreCount > 0, usage.count > eCoreCount {
+                HStack(spacing: 12) {
+                    LegendDot(color: MacPulseTheme.violet, label: "\(eCoreCount) 能效核")
+                    LegendDot(color: MacPulseTheme.plugged, label: "\(usage.count - eCoreCount) 性能核")
+                }
+            }
+        }
+    }
+}
+
+private struct LegendDot: View {
+    let color: Color
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 8, height: 8)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - 内存
+
+struct MemoryPanelView: View {
+    @EnvironmentObject private var model: DashboardModel
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                if let memory = model.memory {
+                    breakdownCard(memory)
+                    pressureCard(memory)
+                } else {
+                    LiquidCard {
+                        Text("内存读数暂不可用")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 60)
+                    }
+                }
+                topConsumersCard
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
+    }
+
+    private func breakdownCard(_ memory: MemoryBreakdown) -> some View {
+        LiquidCard {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionHeader(
+                    title: "统一内存",
+                    subtitle: MetricFormat.bytes(memory.totalBytes)
+                )
+                MemoryStackedBar(memory: memory)
+                LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], spacing: 7) {
+                    MemoryLegendItem(color: .primary.opacity(0.85), title: "应用内存", bytes: memory.appBytes)
+                    MemoryLegendItem(color: .primary.opacity(0.60), title: "联动内存", bytes: memory.wiredBytes)
+                    MemoryLegendItem(color: .primary.opacity(0.38), title: "压缩内存", bytes: memory.compressedBytes)
+                    MemoryLegendItem(color: .primary.opacity(0.20), title: "缓存文件", bytes: memory.cachedFilesBytes)
+                    MemoryLegendItem(color: .primary.opacity(0.08), title: "可用", bytes: memory.freeBytes)
+                }
+                Text("与「活动监视器 → 内存 → 已使用内存」口径一致：应用 + 联动 + 压缩，不含缓存文件。")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func pressureCard(_ memory: MemoryBreakdown) -> some View {
+        LiquidCard {
+            VStack(alignment: .leading, spacing: 11) {
+                SectionHeader(title: "内存压力", subtitle: memory.pressureLevel.title)
+                ValueRow(
+                    title: "压力（近似）",
+                    value: memory.approximatePressurePercent.map { String(format: "%.0f%%", $0) } ?? "不可用",
+                    symbol: "gauge.with.dots.needle.50percent",
+                    tint: pressureColor(memory.pressureLevel)
+                )
+                // Apple 从未公开活动监视器那条压力曲线的算法。标注为近似值，
+                // 并让颜色由内核给的等级驱动，而不是由这个估算值驱动。
+                Text("Apple 未公开确切算法，此处按「已联动 + 已压缩」占比估算；左侧状态色取自内核给出的压力等级。")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider()
+                ValueRow(
+                    title: "交换空间",
+                    value: swapText(memory),
+                    symbol: "arrow.triangle.swap"
+                )
+                ValueRow(
+                    title: "压缩节省",
+                    value: MetricFormat.bytes(memory.compressorSavedBytes),
+                    symbol: "arrow.down.right.and.arrow.up.left"
+                )
+            }
+        }
+    }
+
+    private func swapText(_ memory: MemoryBreakdown) -> String {
+        guard let used = memory.swapUsedBytes else { return "不可用" }
+        guard let total = memory.swapTotalBytes else { return MetricFormat.bytes(used) }
+        return "\(MetricFormat.bytes(used)) / \(MetricFormat.bytes(total))"
+    }
+
+    private func pressureColor(_ level: MemoryPressureLevel) -> Color {
+        switch level {
+        case .normal: MacPulseTheme.normal
+        case .warning: MacPulseTheme.warm
+        case .critical: MacPulseTheme.critical
+        case .unknown: .secondary
+        }
+    }
+
+    private var topConsumersCard: some View {
+        LiquidCard {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(title: "占用最多的 App")
+                let top = model.processGroups
+                    .filter { ($0.physicalFootprintBytes ?? 0) > 0 }
+                    .sorted { ($0.physicalFootprintBytes ?? 0) > ($1.physicalFootprintBytes ?? 0) }
+                    .prefix(6)
+                if top.isEmpty {
+                    Text("进程监控未开启或仍在采集")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(top)) { group in
+                        ValueRow(
+                            title: group.displayName,
+                            value: MetricFormat.bytes(group.physicalFootprintBytes),
+                            symbol: "app.dashed"
+                        )
+                    }
+                    Text(ProcessMetricKind.memory.caption ?? "")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+}
+
+/// 内存分项堆叠条。同样用单个 `Canvas`，理由见 `PerCoreBars`。
+private struct MemoryStackedBar: View {
+    let memory: MemoryBreakdown
+
+    var body: some View {
+        Canvas { context, size in
+            let total = Double(memory.totalBytes)
+            guard total > 0 else { return }
+            // 四档墨阶,深→浅 = 应用→缓存:占用越「硬」颜色越重,
+            // 单色下依然一眼读出结构。
+            let segments: [(UInt64, Color)] = [
+                (memory.appBytes, .primary.opacity(0.85)),
+                (memory.wiredBytes, .primary.opacity(0.60)),
+                (memory.compressedBytes, .primary.opacity(0.38)),
+                (memory.cachedFilesBytes, .primary.opacity(0.20))
+            ]
+            let radius = size.height / 2
+            context.fill(
+                Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: radius),
+                with: .color(.primary.opacity(0.07))
+            )
+            var x: CGFloat = 0
+            context.clip(to: Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: radius))
+            for (bytes, color) in segments {
+                let width = size.width * CGFloat(Double(bytes) / total)
+                guard width > 0 else { continue }
+                context.fill(
+                    Path(CGRect(x: x, y: 0, width: width, height: size.height)),
+                    with: .color(color)
+                )
+                x += width
+            }
+        }
+        .frame(height: 14)
+    }
+}
+
+private struct MemoryLegendItem: View {
+    let color: Color
+    let title: String
+    let bytes: UInt64
+
+    var body: some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 2.5).fill(color).frame(width: 9, height: 9)
+            Text(title).font(.caption)
+            Spacer(minLength: 2)
+            Text(MetricFormat.bytes(bytes))
+                .font(.caption.weight(.medium))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - 磁盘
+
+struct DiskPanelView: View {
+    @EnvironmentObject private var model: DashboardModel
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                if let overview = model.diskOverview, !overview.volumes.isEmpty {
+                    ForEach(overview.volumes) { volume in
+                        volumeCard(volume)
+                    }
+                    throughputCard(overview)
+                    ssdTemperatureCard
+                } else {
+                    LiquidCard {
+                        VStack(spacing: 8) {
+                            SectionHeader(title: "磁盘")
+                            Text("正在读取卷信息…")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
+    }
+
+    private func volumeCard(_ volume: VolumeInfo) -> some View {
+        LiquidCard {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(
+                    title: volume.name,
+                    subtitle: volume.isRoot ? "启动卷" : (volume.isInternal ? "内置" : "外置")
+                )
+                VolumeCapacityBar(volume: volume)
+                HStack(spacing: 12) {
+                    DiskLegendItem(color: MacPulseTheme.ink, title: "已用",
+                                   bytes: UInt64(volume.exclusiveUsedBytes))
+                    if volume.purgeableBytes > 0 {
+                        DiskLegendItem(color: .primary.opacity(0.25), title: "可自动腾出",
+                                       bytes: UInt64(volume.purgeableBytes))
+                    }
+                    DiskLegendItem(color: .clear, title: "可用",
+                                   bytes: UInt64(volume.availableBytes))
+                }
+                if volume.purgeableBytes > 0 {
+                    Text("「可自动腾出」是缓存与本地快照,系统需要空间时会自己清,不用手动删。")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func throughputCard(_ overview: DiskOverview) -> some View {
+        LiquidCard {
+            VStack(spacing: 12) {
+                SectionHeader(title: "读写活动")
+                ValueRow(
+                    title: "实时读取",
+                    value: MetricFormat.rate(model.current.deep.diskReadBytesPerSecond),
+                    symbol: "arrow.down.circle",
+                    tint: .blue
+                )
+                ValueRow(
+                    title: "实时写入",
+                    value: MetricFormat.rate(model.current.deep.diskWriteBytesPerSecond),
+                    symbol: "arrow.up.circle",
+                    tint: .orange
+                )
+                ValueRow(
+                    title: "本次开机累计读取",
+                    value: overview.sessionReadBytes.map { MetricFormat.bytes($0) } ?? "不可用",
+                    symbol: "tray.and.arrow.down"
+                )
+                ValueRow(
+                    title: "本次开机累计写入",
+                    value: overview.sessionWriteBytes.map { MetricFormat.bytes($0) } ?? "不可用",
+                    symbol: "tray.and.arrow.up"
+                )
+                // 写入量给参照系,否则「1.2TB」读不出好坏。SSD 写入寿命按 TBW 计,
+                // 现代 1TB 级 SSD 通常在数百 TBW 量级——单日几十 GB 完全正常。
+                Text("累计量从开机起算,重启归零。")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    /// SSD/NAND 温度来自采集器的温度分组,有就显示,没有整卡不出现。
+    @ViewBuilder
+    private var ssdTemperatureCard: some View {
+        let groups = (model.current.deep.thermalGroups ?? [])
+            .filter { $0.kind == .ssd || $0.kind == .nand || $0.kind == .nvme }
+        if !groups.isEmpty {
+            LiquidCard {
+                VStack(spacing: 12) {
+                    SectionHeader(title: "存储温度")
+                    ForEach(groups) { group in
+                        ValueRow(
+                            title: group.kind.title,
+                            value: MetricFormat.temperature(group.averageCelsius),
+                            symbol: "thermometer.medium",
+                            tint: .orange
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 卷容量条:已用 + 可自动腾出,底轨是总容量。同 MemoryStackedBar 用单个 Canvas。
+private struct VolumeCapacityBar: View {
+    let volume: VolumeInfo
+
+    var body: some View {
+        Canvas { context, size in
+            let total = Double(volume.totalBytes)
+            guard total > 0 else { return }
+            let radius = size.height / 2
+            let track = Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: radius)
+            context.fill(track, with: .color(.primary.opacity(0.07)))
+            context.clip(to: track)
+            // 已用(扣腾出)+ 可腾出 + 可用 == 总容量,三段账目闭合。
+            let segments: [(Int64, Color)] = [
+                (volume.exclusiveUsedBytes, MacPulseTheme.ink),
+                (volume.purgeableBytes, .primary.opacity(0.25))
+            ]
+            var x: CGFloat = 0
+            for (bytes, color) in segments {
+                let width = size.width * CGFloat(Double(bytes) / total)
+                guard width > 0 else { continue }
+                context.fill(
+                    Path(CGRect(x: x, y: 0, width: width, height: size.height)),
+                    with: .color(color)
+                )
+                x += width
+            }
+        }
+        .frame(height: 14)
+    }
+}
+
+private struct DiskLegendItem: View {
+    let color: Color
+    let title: String
+    let bytes: UInt64
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if color != .clear {
+                RoundedRectangle(cornerRadius: 2.5).fill(color).frame(width: 9, height: 9)
+            }
+            Text(title).font(.caption)
+            Text(MetricFormat.bytes(bytes))
+                .font(.caption.weight(.medium))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - 温度
+
+struct ThermalPanelView: View {
+    @EnvironmentObject private var model: DashboardModel
+
+    /// 16 组一次铺开会淹没信息。只默认展开芯片，其余按需。
+    @State private var expanded: Set<ThermalGroupKind.Section> = [.chip]
+
+    private var groups: [ThermalGroup] { model.current.deep.thermalGroups ?? [] }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                summaryCard
+                if groups.isEmpty {
+                    LiquidCard {
+                        Text("温度分组数据暂不可用")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 60)
+                    }
+                } else {
+                    ForEach(ThermalGroupKind.Section.allCases, id: \.self) { section in
+                        let sectionGroups = groups
+                            .filter { $0.kind.section == section }
+                            .sorted { ($0.averageCelsius ?? 0) > ($1.averageCelsius ?? 0) }
+                        if !sectionGroups.isEmpty {
+                            sectionCard(section, sectionGroups)
+                        }
+                    }
+                }
+                CollectorStatusBanner()
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
+    }
+
+    private var summaryCard: some View {
+        LiquidCard {
+            VStack(spacing: 11) {
+                SectionHeader(title: "热状态", subtitle: model.current.deep.thermalLevel.title)
+                ValueRow(
+                    title: "芯片热点（单点最高）",
+                    value: MetricFormat.temperature(model.current.deep.hotspotTemperature),
+                    symbol: "thermometer.high",
+                    tint: MacPulseTheme.warm
+                )
+                ValueRow(
+                    title: "传感器分组",
+                    // 采集器断线时分组为空:「0 组 · 0 个传感器」是假 0,如实说不可用。
+                    value: groups.isEmpty
+                        ? "不可用"
+                        : "\(groups.count) 组 · \(groups.compactMap(\.sensorCount).reduce(0, +)) 个传感器",
+                    symbol: "sensor"
+                )
+            }
+        }
+    }
+
+    private func sectionCard(_ section: ThermalGroupKind.Section, _ items: [ThermalGroup]) -> some View {
+        LiquidCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Button {
+                    if expanded.contains(section) {
+                        expanded.remove(section)
+                    } else {
+                        expanded.insert(section)
+                    }
+                } label: {
+                    HStack {
+                        SectionHeader(title: section.rawValue, subtitle: "\(items.count) 组")
+                        Spacer(minLength: 0)
+                        Image(systemName: expanded.contains(section) ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if expanded.contains(section) {
+                    ForEach(items) { group in
+                        ThermalGroupRow(group: group)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct ThermalGroupRow: View {
+    let group: ThermalGroup
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text(group.kind == .other ? group.rawName : group.kind.title)
+                    .font(.callout)
+                Spacer()
+                Text(MetricFormat.temperature(group.averageCelsius))
+                    .font(.callout.weight(.semibold))
+                    .monospacedDigit()
+                Text(group.sensorCount.map { "\($0) 个" } ?? "—")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, alignment: .trailing)
+            }
+            if let minimum = group.trustworthyMinimumCelsius, let maximum = group.maximumCelsius, maximum > minimum {
+                RangeBar(minimum: minimum, maximum: maximum, current: group.averageCelsius)
+            }
+        }
+    }
+}
+
+/// 传感器组的 min–max 区间条。
+///
+/// 只有最小值可信时才画：实测出现过 `VRM min 1.0°C` 这种明显失灵的读数，
+/// 画一条从 1° 开始的区间会让整组数据看起来荒唐，但平均值本身是好的。
+private struct RangeBar: View {
+    let minimum: Double
+    let maximum: Double
+    let current: Double?
+
+    var body: some View {
+        GeometryReader { proxy in
+            let span = max(maximum - minimum, 0.1)
+            ZStack(alignment: .leading) {
+                Capsule().fill(.primary.opacity(0.07))
+                if let current {
+                    let fraction = min(max((current - minimum) / span, 0), 1)
+                    Circle()
+                        .fill(MacPulseTheme.warm)
+                        .frame(width: 5, height: 5)
+                        .offset(x: proxy.size.width * fraction - 2.5)
+                }
+            }
+        }
+        .frame(height: 5)
+    }
+}
+
+// MARK: - 共用
+
+/// 采集器状态提示。芯片页与温度页共用，只在非正常状态下出现。
+struct CollectorStatusBanner: View {
+    @EnvironmentObject private var model: DashboardModel
+
+    var body: some View {
+        if model.collectorStatus.phase != .live {
+            LiquidCard(padding: 12) {
+                HStack(alignment: .top, spacing: 9) {
+                    Image(systemName: symbol)
+                        .foregroundStyle(color)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title)
+                            .font(.callout.weight(.semibold))
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private var title: String {
+        switch model.collectorStatus.phase {
+        case .starting: "正在连接深度采集器"
+        case .live: "深度采集器运行正常"
+        case .degraded: "部分传感器暂不可用"
+        case .reconnecting: "正在重新连接采集器"
+        case .unavailable: "当前使用基础系统指标"
+        case .sleeping: "睡眠期间暂停采集"
+        }
+    }
+
+    private var detail: String {
+        switch model.collectorStatus.phase {
+        case .degraded:
+            model.collectorStatus.warnings.isEmpty
+                ? "可用数据会继续刷新，缺失项明确显示为「不可用」。"
+                : "有 \(model.collectorStatus.warnings.count) 项深度数据缺失，其余读数仍会继续更新。"
+        case .reconnecting:
+            "CPU、内存与热状态由本机直接读取，不受影响；连接恢复后自动补回功耗与温度分组。"
+        case .unavailable:
+            "找不到内嵌采集器。CPU、内存、每核占用与进程数据仍然可用。"
+        case .sleeping:
+            "唤醒 Mac 后会自动恢复采集，不会把睡眠间隔补成零值。"
+        case .starting:
+            "首次读取通常只需几秒钟。"
+        case .live:
+            "所有可用传感器均在更新。"
+        }
+    }
+
+    private var symbol: String {
+        switch model.collectorStatus.phase {
+        case .starting, .reconnecting: "arrow.trianglehead.2.clockwise.rotate.90"
+        case .degraded, .unavailable: "exclamationmark.triangle.fill"
+        case .sleeping: "moon.zzz.fill"
+        case .live: "checkmark.circle.fill"
+        }
+    }
+
+    private var color: Color {
+        switch model.collectorStatus.phase {
+        case .live: MacPulseTheme.normal
+        case .starting: MacPulseTheme.plugged
+        case .sleeping: .secondary
+        case .degraded, .reconnecting, .unavailable: MacPulseTheme.warm
+        }
+    }
+}

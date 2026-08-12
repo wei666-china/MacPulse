@@ -1,0 +1,1064 @@
+import AppKit
+import Combine
+import Foundation
+import MacPulseCore
+import UserNotifications
+
+/// 面板的展示来源。`RootView` 会被实例化两次（菜单栏弹窗 + 独立窗口），
+/// 用具名来源而不是计数器，注册与注销才是幂等的。
+enum PresentationSource: String, Hashable, Sendable {
+    case menuBar
+    case window
+}
+
+/// 「性能」标签下的子页。采样成本按当前可见的子页门控：
+/// 昂贵的原生遍历（进程级 GPU、ANE 持有者）只在需要它们的子页可见时才跑。
+enum PerformancePane: String, CaseIterable, Identifiable, Sendable {
+    case soc = "芯片"
+    case memory = "内存"
+    case disk = "磁盘"
+    case thermal = "温度"
+    case processes = "进程"
+
+    var id: String { rawValue }
+}
+
+@MainActor
+final class DashboardModel: ObservableObject {
+    static let shared = DashboardModel()
+
+    @Published private(set) var current = MetricSnapshot()
+    @Published private(set) var history: [HistoryPoint] = []
+    @Published private(set) var liveHistory: [HistoryPoint] = []
+    @Published private(set) var isLoading = true
+    @Published private(set) var lastCollectorUpdate: Date?
+    @Published private(set) var collectorStatus = CollectorStatus()
+    @Published private(set) var sampleInterval: TimeInterval = 10
+    @Published private(set) var historyStoreStatus = "正在准备历史数据"
+    /// 升级前备份的结果。nil 表示无需备份（全新安装），不显示这一行。
+    @Published private(set) var historyBackupStatus: String?
+    /// 统一内存分项。本机直接读取，与采集器状态无关。
+    @Published private(set) var memory: MemoryBreakdown?
+    /// 每个逻辑核的占用率，按硬件索引排列（能效核在前）。首次采样前为空。
+    @Published private(set) var perCoreUsage: [Double] = []
+    /// 续航估算。三个来源并排展示，系统值只作对照。
+    @Published private(set) var runtimeEstimate = RuntimeEstimate()
+    /// 当前背光读数，用于耗电分档与「亮度调低能多用多久」。
+    @Published private(set) var backlight: BacklightSample?
+    /// 充电链路快照（充电器 → 线缆 → 协商结果）。
+    /// nil 与「不显示」同义：没插电、读不到协商节点、或口状态门闸没过。
+    @Published private(set) var chargeLink: ChargeLinkSnapshot?
+    /// 磁盘面板快照(卷容量 + 开机累计读写)。只在磁盘子页可见时刷新。
+    @Published private(set) var diskOverview: DiskOverview?
+    /// 蓝牙外设电量。空数组 = 确实没有带电量上报的外设(如实隐藏卡片)。
+    @Published private(set) var peripheralBatteries: [PeripheralBattery] = []
+    /// 估算器对自己历史预测的准确度自述。
+    @Published private(set) var estimateAccuracy = PowerSessionTracker.Accuracy()
+    /// 系统网络路径快照。零流量读数，与是否开启测速无关。
+    @Published private(set) var networkPath = NetworkPathSnapshot()
+    /// 最近一次测速结果。
+    @Published private(set) var networkResult: NetworkTestResult?
+    /// 测速当前阶段（「测量下载」之类）。nil 表示没在跑。
+    @Published private(set) var networkPhase: String?
+    /// 这次为什么没测。必须显示出来——静默跳过等于让人以为测过了。
+    @Published private(set) var networkSkipReason: NetworkSkipReason?
+    /// 完整测速被降级的原因（比如在热点上）。
+    @Published private(set) var networkDowngradeReason: NetworkSkipReason?
+    /// 历次测速，供趋势图使用。保留 90 天。
+    @Published private(set) var networkHistory: [NetworkTestRecord] = []
+    /// 当前持有神经引擎会话的进程 pid。
+    ///
+    /// nil 与空集合含义不同，界面必须区别对待：
+    /// nil = 读不到（隐藏整张卡）；[] = 确实没人在用（如实显示）。
+    @Published private(set) var aneHolderPIDs: Set<pid_t>?
+    @Published private(set) var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
+    @Published private(set) var processGroups: [ProcessGroupSnapshot] = []
+    @Published private(set) var processMonitorStatus = ProcessMonitorStatus()
+    @Published private(set) var processHistoryStatus = "正在准备进程历史"
+    @Published private(set) var processHistoryCache: [String: [ProcessHistoryPoint]] = [:]
+
+    private let fallback = SystemFallbackReader()
+    private let collector = DeepCollectorClient()
+    private let processSampler = ProcessSampler()
+    private let historyStore: HistoryStore?
+    private let processHistoryStore: ProcessHistoryStore?
+    private let notifications = NotificationService()
+    private var latestDeep = DeepMetrics()
+    private var samplerTask: Task<Void, Never>?
+    private var processSamplerTask: Task<Void, Never>?
+    private var aggregator = MinuteAggregator()
+    private var processAggregator = ProcessMinuteAggregator()
+    private var started = false
+    /// 当前正在展示面板的来源集合。
+    ///
+    /// 之前这里是个计数器，结果计数减不回 0：独立窗口的 `isReleasedWhenClosed = false`
+    /// 让「关闭」只是 order out，SwiftUI 的 `onDisappear` 不一定触发，于是 +1 之后
+    /// 永远没有对应的 -1。采样率被永久钉在 2 秒 —— 实测 mactop 连跑 20 小时、
+    /// 14.2% CPU。改成按来源去重的集合后，重复的 appear 不再累加，漏掉的
+    /// disappear 最多只留下一个陈旧条目，且 AppDelegate 会用窗口通知把它清掉。
+    private var activePresentationSources: Set<PresentationSource> = []
+    private var activePresentations: Int { activePresentationSources.count }
+    private var processPageActive = false
+    private var visiblePane: PerformancePane?
+    private let aneReader = ANEClientReader()
+    private let backlightReader = DisplayBacklightReader()
+    private let batterySampler = BatterySampler()
+    private let chargeLinkSampler = ChargeLinkSampler()
+    private let peripheralReader = PeripheralBatteryReader()
+    private var batteryPageActive = false
+    private var overviewActive = false
+    private var isRefreshing = false
+    private var runtimeEstimator = RuntimeEstimator()
+    private var drainProfile = DrainProfile.shippingPrior()
+    private var sessionTracker = PowerSessionTracker()
+    /// 本次放电段的近期电量轨迹，喂给「观测斜率一致性」钳制。
+    private var recentSocTrail: [(date: Date, soc: Double)] = []
+    private var lastChargeState: ChargeState?
+    private var pathObserver: NetworkPathObserver?
+    private let networkProbe = NetworkProbe()
+    private var networkTestTask: Task<Void, Never>?
+    private var networkTriggerTask: Task<Void, Never>?
+    private var lastNetworkTestAt: Date?
+    private var lastNetworkKeyHash: String?
+    private let networkTestStore: NetworkTestStore?
+    private var suspended = false
+
+    private init() {
+        var openedStore: HistoryStore?
+        do {
+            let store = try HistoryStore()
+            openedStore = store
+            history = try store.loadRecent()
+            try store.prune()
+            historyStoreStatus = store.migratedRecordCount > 0
+                ? "已安全迁移 \(store.migratedRecordCount) 条旧历史数据"
+                : "历史数据正常"
+            historyBackupStatus = Self.describe(store.backupState)
+        } catch {
+            historyStoreStatus = "历史数据不可用：\(error.localizedDescription)"
+        }
+        historyStore = openedStore
+
+        var openedProcessStore: ProcessHistoryStore?
+        do {
+            let store = try ProcessHistoryStore()
+            try store.prune()
+            openedProcessStore = store
+            processHistoryStatus = "重点进程历史正常"
+        } catch {
+            processHistoryStatus = "进程历史不可用：\(error.localizedDescription)"
+        }
+        processHistoryStore = openedProcessStore
+
+        var openedNetworkStore: NetworkTestStore?
+        do {
+            let store = try NetworkTestStore()
+            try store.prune()
+            openedNetworkStore = store
+        } catch {
+            // 测速历史存不下不影响测速本身，静默降级即可。
+            openedNetworkStore = nil
+        }
+        networkTestStore = openedNetworkStore
+        networkHistory = (try? openedNetworkStore?.loadRecent()) ?? []
+        loadDrainProfile()
+        backfillDrainProfileIfNeeded()
+        estimateAccuracy = sessionTracker.accuracy()
+    }
+
+    /// 首次运行时用现有历史回填耗电档案。
+    ///
+    /// 历史里有 `cpuUsagePercent` 和 `batteryPowerWatts`，覆盖率接近 100%；
+    /// **没有亮度**——所以回填只写 T1/T2 两级。这恰好是正确的做法：
+    /// 只学数据里真实存在的东西，不为缺失的维度编造。
+    /// 效果是第一次打开就有成熟档案，而不是等一周。
+    private func backfillDrainProfileIfNeeded() {
+        // v2：v1 的回填结果曾因 chargeProfile 解码失败被静默丢弃（见
+        // DrainProfile.init(from:) 的注释）。换 key 触发一次重新回填即可
+        // 自愈——EWMA 不是求和，重复喂同一段历史不会双计，只会收敛到尾部。
+        let key = "MacPulse.drainProfileBackfilled.v2"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        defer { UserDefaults.standard.set(true, forKey: key) }
+
+        let discharging = history.filter { ($0.batteryPowerWatts ?? 0) < -0.05 }
+        guard discharging.count > 60 else { return }
+
+        for point in discharging {
+            guard let watts = point.batteryPowerWatts else { continue }
+            let context = UsageContext(
+                cpuPercent: point.cpuUsagePercent,
+                backlightMicroAmps: nil,
+                lowPowerMode: false
+            )
+            drainProfile.record(watts: abs(watts), context: context, at: point.timestamp)
+        }
+        saveDrainProfile()
+    }
+
+    // MARK: - 续航估算
+
+    /// 学习状态：耗电档案 + 已完成的放电段。
+    ///
+    /// 一起存成 JSON，**刻意不进 SwiftData**。这样完全避开了给 `HistoryRecord`
+    /// 加列的迁移风险——那 6899 条历史比这份档案珍贵得多，不值得为了存
+    /// 几十个浮点数去动它的 schema。
+    private struct LearningState: Codable {
+        var profile: DrainProfile
+        var sessions: [DischargeSession]
+    }
+
+    private static var drainProfileURL: URL? {
+        try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        .appendingPathComponent("MacPulse", isDirectory: true)
+        .appendingPathComponent("drain-profile.json")
+    }
+
+    private func loadDrainProfile() {
+        guard let url = Self.drainProfileURL, let data = try? Data(contentsOf: url) else { return }
+        if let state = try? JSONDecoder().decode(LearningState.self, from: data) {
+            // 出厂先验只在没有真实档案时使用；一旦学过就完全以学到的为准。
+            drainProfile = state.profile
+            sessionTracker = PowerSessionTracker(completed: state.sessions)
+        } else if let legacy = try? JSONDecoder().decode(DrainProfile.self, from: data) {
+            // 早期版本只存了档案本身，兼容读入。
+            drainProfile = legacy
+        }
+    }
+
+    private func saveDrainProfile() {
+        guard let url = Self.drainProfileURL,
+              let data = try? JSONEncoder().encode(
+                  LearningState(profile: drainProfile, sessions: sessionTracker.completed)
+              )
+        else { return }
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? data.write(to: url, options: .atomic)
+    }
+
+    /// 每分钟持久化时学一次，不是每次采样。
+    private func learnFromMinute(_ point: HistoryPoint) {
+        // 充电时学分段速率。80% 以上电流会衰减，必须按段分开学，
+        // 否则用低电量段的速率外推会把充满时间算得过于乐观。
+        if let watts = point.batteryPowerWatts, watts > 0.05 {
+            drainProfile.chargeProfile.record(
+                wattHoursPerMinute: watts / 60,
+                soc: point.batteryPercent,
+                adapterRatedWatts: current.battery.adapterRatedWatts,
+                at: point.timestamp
+            )
+            saveDrainProfile()
+            return
+        }
+        guard let watts = point.batteryPowerWatts, watts < -0.05 else { return }
+        let context = UsageContext(
+            cpuPercent: point.cpuUsagePercent,
+            backlightMicroAmps: backlight?.microAmps,
+            lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled
+        )
+        drainProfile.record(watts: abs(watts), context: context, at: point.timestamp)
+        if point.batteryPercent > 0, point.batteryPercent < (drainProfile.observedFloorPercent ?? 100) {
+            drainProfile.observedFloorPercent = max(1, min(5, point.batteryPercent))
+        }
+        saveDrainProfile()
+    }
+
+    private func updateRuntimeEstimate(_ snapshot: MetricSnapshot) {
+        backlight = backlightReader.read()
+
+        let state = snapshot.battery.state
+        // 充放电切换是物理状态突变，EMA 与电量轨迹都必须重来。
+        if state != lastChargeState {
+            runtimeEstimator.reset()
+            recentSocTrail.removeAll()
+            lastChargeState = state
+        }
+
+        let charging = state == .charging
+        // 电量统一用系统显示的百分比，**不用 AppleRawCurrentCapacity/AppleRawMaxCapacity
+        // 的比值**。
+        //
+        // 那个比值和显示值并不是同一把尺子，实测四个时刻：98% vs 93.18、
+        // 82% vs 81.0、40% vs 36.6、34% vs 33.14——既不是固定偏移也不是固定比例，
+        // 而且 rawMax 本身还在漂（5582→5600→5625）。电量计有自己的换算，
+        // 两端都留了余量。
+        //
+        // 更关键的是 Wh/% = 67.3 这个标定是拿历史里的**显示百分比**积分出来的。
+        // 把 raw 比值喂进同一个公式等于两把尺子混用，实测会凭空差 5%。
+        // 整数百分比带来的台阶（7W 下约 6 分钟）由显示层的变化率限制吸收。
+        let socFine = snapshot.battery.percentage
+        trackSocTrail(socFine, at: snapshot.timestamp, charging: charging)
+
+        let context = UsageContext(
+            cpuPercent: snapshot.deep.cpuUsagePercent,
+            backlightMicroAmps: backlight?.microAmps,
+            lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled
+        )
+
+        let (drop, window) = socTrailDelta()
+        let input = RuntimeEstimatorInput(
+            socFinePercent: socFine,
+            wattHoursPerPercent: wattHoursPerPercent(snapshot.battery),
+            reserveFloorPercent: drainProfile.observedFloorPercent ?? 3,
+            netPowerWatts: snapshot.battery.netPowerWatts,
+            gaugeMinutes: charging
+                ? snapshot.battery.gaugeMinutesToFull
+                : snapshot.battery.gaugeMinutesToEmpty,
+            systemEstimateMinutes: snapshot.battery.timeRemainingMinutes,
+            context: context,
+            isCharging: charging,
+            now: snapshot.timestamp,
+            sampleInterval: sampleInterval,
+            recentSocDropPercent: drop,
+            recentWindowMinutes: window,
+            adapterRatedWatts: snapshot.battery.adapterRatedWatts
+        )
+
+        runtimeEstimate = runtimeEstimator.update(input, profile: drainProfile)
+
+        // 记录预测供日后对账。段结束时才算分——这样算出来的是真实误差，
+        // 不是自我感觉。
+        let before = sessionTracker.completed.count
+        sessionTracker.ingest(
+            PowerSessionTracker.Sample(
+                date: snapshot.timestamp,
+                socPercent: socFine,
+                netPowerWatts: snapshot.battery.netPowerWatts,
+                isDischarging: state == .discharging || state == .pluggedDischarging,
+                predictedMinutes: runtimeEstimate.minutes
+            )
+        )
+        if sessionTracker.completed.count != before {
+            finalizeCompletedSessions()
+        }
+    }
+
+    /// 一段放电结束：更新准确度自述，并把实测的 Wh/% 喂回能量模型。
+    private func finalizeCompletedSessions() {
+        estimateAccuracy = sessionTracker.accuracy()
+
+        let nameplate = current.battery.maxCapacityMAh.map { Double($0) * 11.4 / 100_000 }
+        if let latest = sessionTracker.completed.last?.wattHoursPerPercent {
+            drainProfile.recordWattHoursPerPercent(latest, nameplate: nameplate)
+        }
+        if let floor = sessionTracker.completed.last?.endSoc, floor > 0, floor < 8 {
+            drainProfile.observedFloorPercent = max(1, min(5, floor))
+        }
+        saveDrainProfile()
+    }
+
+    /// 学到的 Wh/%；没学到就用铭牌推算。
+    ///
+    /// 铭牌用**设计标称电压 11.4V** 而不是瞬时 `Voltage`：后者会随电量下垂，
+    /// 在低电量时把可用能量系统性低估约 6%。
+    private func wattHoursPerPercent(_ battery: BatteryMetrics) -> Double {
+        if let learned = drainProfile.learnedWattHoursPerPercent, learned > 0 {
+            return learned
+        }
+        if let maxCapacity = battery.maxCapacityMAh, maxCapacity > 200 {
+            return Double(maxCapacity) * 11.4 / 100_000
+        }
+        if let design = battery.designCapacityMAh, design > 200 {
+            let health = (battery.healthPercent ?? 100) / 100
+            return Double(design) * health * 11.4 / 100_000
+        }
+        return 0.631
+    }
+
+    private func trackSocTrail(_ soc: Double, at date: Date, charging: Bool) {
+        guard !charging else { return }
+        recentSocTrail.append((date: date, soc: soc))
+        // 只留最近 15 分钟。
+        let cutoff = date.addingTimeInterval(-900)
+        recentSocTrail.removeAll { $0.date < cutoff }
+    }
+
+    private func socTrailDelta() -> (Double?, Double?) {
+        guard let first = recentSocTrail.first, let last = recentSocTrail.last else { return (nil, nil) }
+        let drop = first.soc - last.soc
+        let minutes = last.date.timeIntervalSince(first.date) / 60
+        guard drop > 0, minutes >= 3 else { return (nil, nil) }
+        return (drop, minutes)
+    }
+
+    // MARK: - 网络测速
+
+    private var networkConsent: NetworkConsent {
+        NetworkConsent(rawValue: UserDefaults.standard.string(forKey: "networkTestConsent") ?? "")
+            ?? .notDetermined
+    }
+
+    private var networkAutoRunEnabled: Bool {
+        UserDefaults.standard.object(forKey: "networkAutoRun") as? Bool ?? true
+    }
+
+    private var networkPreferredTier: NetworkTestTier {
+        NetworkTestTier(rawValue: UserDefaults.standard.string(forKey: "networkTestTier") ?? "")
+            ?? .standard
+    }
+
+    private var networkMinimumInterval: TimeInterval {
+        let stored = UserDefaults.standard.object(forKey: "networkMinimumInterval") as? Double
+        return stored ?? NetworkTestPolicy.defaultMinimumInterval
+    }
+
+    var isNetworkTestRunning: Bool { networkPhase != nil }
+
+    private func reloadNetworkHistory() {
+        networkHistory = (try? networkTestStore?.loadRecent()) ?? []
+    }
+
+    /// 面板打开时触发。加 1.5 秒去抖：开了立刻关不该发出任何请求。
+    private func scheduleNetworkTest(trigger: NetworkTestTrigger) {
+        networkTriggerTask?.cancel()
+        networkTriggerTask = Task { [weak self] in
+            if trigger != .manual {
+                try? await Task.sleep(for: .milliseconds(1_500))
+                guard !Task.isCancelled else { return }
+            }
+            await self?.runNetworkTest(trigger: trigger)
+        }
+    }
+
+    func requestManualNetworkTest() {
+        scheduleNetworkTest(trigger: .manual)
+    }
+
+    func cancelNetworkTest() {
+        networkTriggerTask?.cancel()
+        networkTriggerTask = nil
+        networkTestTask?.cancel()
+        networkTestTask = nil
+        Task { await networkProbe.cancel() }
+        networkPhase = nil
+    }
+
+    private func runNetworkTest(trigger: NetworkTestTrigger) async {
+        guard activePresentations > 0 || trigger == .manual else { return }
+
+        let keyHash = NetworkIdentity.hash(
+            gatewayMAC: NetworkIdentity.currentGatewayMAC(),
+            interfaceName: networkPath.primaryInterfaceName
+        )
+        let input = NetworkTestPolicy.Input(
+            trigger: trigger,
+            consent: networkConsent,
+            autoRunEnabled: networkAutoRunEnabled,
+            preferredTier: networkPreferredTier,
+            path: networkPath,
+            now: .now,
+            lastCompletedAt: lastNetworkTestAt,
+            lastTier: networkResult?.tier,
+            networkKeyChanged: keyHash != nil && keyHash != lastNetworkKeyHash,
+            minimumInterval: networkMinimumInterval,
+            batteryPercent: current.battery.percentage,
+            isDischarging: current.battery.state == .discharging,
+            thermalUnderPressure: [.serious, .critical].contains(current.deep.thermalLevel),
+            isRunning: isNetworkTestRunning
+        )
+
+        switch NetworkTestPolicy.decide(input) {
+        case let .skip(reason):
+            networkSkipReason = reason
+            return
+        case let .run(tier):
+            networkSkipReason = nil
+            networkDowngradeReason = NetworkTestPolicy.downgradeReason(input)
+            await performNetworkTest(tier: tier, trigger: trigger, keyHash: keyHash)
+        }
+    }
+
+    private func performNetworkTest(tier: NetworkTestTier, trigger: NetworkTestTrigger, keyHash: String?) async {
+        let link = current.deep.networkLink
+        let path = networkPath
+        networkPhase = "准备中"
+
+        // 进度回调单独提出来，避免在已经捕获了 weak self 的闭包里再嵌一层捕获。
+        let reportPhase: @Sendable (NetworkProbe.Progress) -> Void = { [weak self] progress in
+            guard case let .phase(name) = progress else { return }
+            Task { @MainActor in
+                self?.networkPhase = name
+            }
+        }
+
+        let task = Task<Void, Never> { [weak self, networkProbe] in
+            let result = try? await networkProbe.run(
+                plan: .forTier(tier),
+                trigger: trigger,
+                link: link,
+                path: path,
+                onProgress: reportPhase
+            )
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.networkPhase = nil
+                guard let result else { return }
+                self.networkResult = result
+                self.lastNetworkTestAt = result.startedAt
+                self.lastNetworkKeyHash = keyHash
+                self.reloadNetworkHistory()
+                // 部分结果也存：配更宽的误差区间它依然是诚实数据，
+                // 重测反而浪费用户的流量。
+                try? self.networkTestStore?.save(result, networkKeyHash: keyHash)
+            }
+        }
+        networkTestTask = task
+        await task.value
+    }
+
+    /// 自选指标组合的菜单栏文本。读不到的指标段直接跳过(不显示「—」占位),
+    /// 全都读不到才给一个兜底短横;紧凑模式只取选择里的第一项。
+    func menuBarTitle(metrics: [MenuBarMetric], compact: Bool) -> String {
+        let picked = compact ? Array(metrics.prefix(1)) : metrics
+        let segments = picked.compactMap(menuBarSegment)
+        if !segments.isEmpty { return segments.joined(separator: " · ") }
+        // 选的都读不到时如实显示短横。旧版会静默换一个别的指标顶上——
+        // 同样是「x.x W」,用户以为看的还是自己选的那个,更糟。
+        return "—"
+    }
+
+    private func menuBarSegment(_ metric: MenuBarMetric) -> String? {
+        switch metric {
+        case .netPower:
+            // 带符号:+ 在充、− 在放。取绝对值的旧版让「插电还在掉电」
+            // 和「插电待机」在菜单栏里长得一模一样。
+            return current.battery.netPowerWatts.map { String(format: "%+.1f W", $0) }
+        case .hotspotTemperature:
+            // 只认芯片热点,不悄悄换成电池温度——菜单栏标着热点显示 31°,
+            // 面板里热点却「不可用」,两处打架。
+            return current.deep.hotspotTemperature.map { String(format: "%.0f°", $0) }
+        case .batteryPercent:
+            return String(format: "%.0f%%", current.battery.percentage)
+        case .socPower:
+            return current.deep.systemPowerWatts.map { String(format: "%.1f W", $0) }
+        case .memoryPercent:
+            return memory?.usedFraction.map { String(format: "内存 %.0f%%", $0 * 100) }
+        }
+    }
+
+    var menuBarAccessibilityLabel: String {
+        let metrics = MenuBarMetric.parse(
+            UserDefaults.standard.string(forKey: "menuBarMetrics") ?? MenuBarMetric.defaultStorage
+        )
+        return "MacPulse，\(current.battery.state.title)，\(menuBarTitle(metrics: metrics, compact: false))"
+    }
+
+    var menuBarSymbol: String {
+        current.battery.state.symbol
+    }
+
+    var chartPoints: [HistoryPoint] {
+        Array((history + liveHistory).suffix(10_080))
+    }
+
+    func start() {
+        guard !started else { return }
+        started = true
+
+        // 路径监听是零流量的本机读数，与是否开启测速无关，始终运行。
+        let observer = NetworkPathObserver { [weak self] snapshot in
+            Task { @MainActor [weak self] in
+                self?.networkPath = snapshot
+            }
+        }
+        observer.start()
+        pathObserver = observer
+
+        collector.start(sampleInterval: sampleInterval) { [weak self] deep, status in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.collectorStatus = status
+                switch status.phase {
+                case .live, .degraded:
+                    self.latestDeep = deep
+                    self.lastCollectorUpdate = .now
+                case .reconnecting, .unavailable, .sleeping:
+                    self.latestDeep = DeepMetrics()
+                case .starting:
+                    break
+                }
+            }
+        }
+        Task {
+            notificationAuthorizationStatus = await notifications.refreshAuthorizationStatus()
+        }
+        restartSampler()
+        restartProcessSampler(resetBaseline: true)
+    }
+
+    func stop() {
+        samplerTask?.cancel()
+        samplerTask = nil
+        processSamplerTask?.cancel()
+        processSamplerTask = nil
+        collector.stop()
+        Task { await processSampler.reset() }
+        pathObserver?.stop()
+        pathObserver = nil
+        started = false
+    }
+
+    func presentationDidAppear(_ source: PresentationSource) {
+        guard activePresentationSources.insert(source).inserted else { return }
+        updateSamplingMode()
+        restartProcessSampler()
+        scheduleNetworkTest(trigger: .panelOpen)
+    }
+
+    func presentationDidDisappear(_ source: PresentationSource) {
+        guard activePresentationSources.remove(source) != nil else { return }
+        // 只有在最后一个面板也收起时才清进程页标记。原先无条件清零，
+        // 会让「关掉菜单栏弹窗」误伤仍开在进程页的独立窗口的采样节奏。
+        if activePresentationSources.isEmpty {
+            processPageActive = false
+            networkTriggerTask?.cancel()
+            networkTriggerTask = nil
+            // 已经在跑的测量走优雅停止：跑完当前块就收尾并存下来。
+            Task { await networkProbe.requestGracefulStop() }
+        }
+        updateSamplingMode()
+        restartProcessSampler()
+    }
+
+    func suspend() {
+        guard !suspended else { return }
+        suspended = true
+        // 跨越睡眠的测量是垃圾，硬取消而不是优雅停止。
+        cancelNetworkTest()
+        // 睡眠前收段：唤醒后另起一段，不把待机时间算进使用时间。
+        sessionTracker.close(reason: .sleep, at: .now, soc: current.battery.socFinePercent ?? current.battery.percentage)
+        finalizeCompletedSessions()
+        if let point = aggregator.flush() {
+            persist(point)
+        }
+        persistProcessPoints(processAggregator.flush())
+        samplerTask?.cancel()
+        samplerTask = nil
+        processSamplerTask?.cancel()
+        processSamplerTask = nil
+        collector.stop()
+        collectorStatus = CollectorStatus(phase: .sleeping)
+        processMonitorStatus.phase = .sleeping
+        Task { await processSampler.reset() }
+    }
+
+    func resume() {
+        guard suspended else { return }
+        suspended = false
+        collector.start(sampleInterval: sampleInterval) { [weak self] deep, status in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.collectorStatus = status
+                if [.live, .degraded].contains(status.phase) {
+                    self.latestDeep = deep
+                    self.lastCollectorUpdate = .now
+                } else if [.reconnecting, .unavailable, .sleeping].contains(status.phase) {
+                    self.latestDeep = DeepMetrics()
+                }
+            }
+        }
+        restartSampler()
+        restartProcessSampler(resetBaseline: true)
+    }
+
+    func requestNotificationAuthorization() {
+        Task {
+            do {
+                _ = try await notifications.requestAuthorization()
+                notificationAuthorizationStatus = await notifications.refreshAuthorizationStatus()
+            } catch {
+                notificationAuthorizationStatus = await notifications.refreshAuthorizationStatus()
+            }
+        }
+    }
+
+    func openNotificationSettings() {
+        notifications.openSystemSettings()
+    }
+
+    func performancePaneChanged(_ pane: PerformancePane?) {
+        guard visiblePane != pane else { return }
+        visiblePane = pane
+        processPageActive = pane == .processes
+        // ANE 持有者名单只在芯片页可见时才扫；离开就立刻清空，
+        // 免得界面显示一份不再刷新的陈旧名单。
+        if pane != .soc {
+            aneHolderPIDs = nil
+        }
+        // 磁盘子页刚打开先补一次,不等下个采样 tick;卷容量是 statfs 级读取,便宜。
+        if pane == .disk {
+            diskOverview = DiskStatsReader.read()
+        }
+        restartProcessSampler()
+    }
+
+    /// 电池页出现/消失时由 BatteryView 上报。充电链路采样只在有人看时跑；
+    /// 页面刚打开先补采一次，不让卡片干等下一个 2–10 秒的 tick。
+    /// 离开页面保留旧快照不清空：下次进来先显示上次结果，随即被补采覆盖，
+    /// 比闪一下空卡片体验好——陈旧窗口最多一个采样周期。
+    /// RootView 的主分区切换上报。目前只有总览页需要感知(充电结论卡的采样门闸)。
+    func sectionChanged(_ section: AppSection?) {
+        let nowActive = section == .overview
+        guard overviewActive != nowActive else { return }
+        overviewActive = nowActive
+        guard nowActive else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            self.chargeLink = await self.chargeLinkSampler.sample()
+        }
+    }
+
+    /// 当前充电链路的判定结论。电池页与总览共用同一份推导,
+    /// 电池状态两个布尔的映射规则只此一处。
+    var chargeLinkDiagnosis: ChargeLinkDiagnosis? {
+        guard let chargeLink else { return nil }
+        let state = current.battery.state
+        // pluggedDischarging(接电但电池仍在放)传 nil:既不是在充也不是被暂停,
+        // 让判定只陈述瓦数事实,不去猜暂停原因。
+        let isCharging: Bool? = switch state {
+        case .charging: true
+        case .pluggedDischarging, .unknown: nil
+        default: false
+        }
+        return ChargeLinkDiagnosis.diagnose(
+            snapshot: chargeLink,
+            batteryFullyCharged: state == .full,
+            batteryIsCharging: isCharging
+        )
+    }
+
+    func batteryPageChanged(_ visible: Bool) {
+        guard batteryPageActive != visible else { return }
+        batteryPageActive = visible
+        guard visible else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            self.chargeLink = await self.chargeLinkSampler.sample()
+            self.peripheralBatteries = await self.peripheralReader.sample()
+        }
+    }
+
+    func setProcessMonitoringEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: "processMonitoringEnabled")
+        if enabled {
+            restartProcessSampler(resetBaseline: true)
+        } else {
+            processSamplerTask?.cancel()
+            processSamplerTask = nil
+            processGroups = []
+            processMonitorStatus = ProcessMonitorStatus(phase: .disabled)
+            Task { await processSampler.reset() }
+        }
+    }
+
+    func setProcessHistoryEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: "processHistoryEnabled")
+        if !enabled {
+            processHistoryCache.removeAll()
+            processAggregator = ProcessMinuteAggregator()
+        }
+    }
+
+    func loadProcessHistory(for stableIdentifier: String) {
+        guard
+            processHistoryCache[stableIdentifier] == nil,
+            processHistoryEnabled,
+            let processHistoryStore
+        else {
+            return
+        }
+        do {
+            processHistoryCache[stableIdentifier] = try processHistoryStore.loadRecent(
+                stableIdentifier: stableIdentifier
+            )
+            processHistoryStatus = "重点进程历史正常"
+        } catch {
+            processHistoryStatus = "进程历史读取失败：\(error.localizedDescription)"
+        }
+    }
+
+    func processHistory(for stableIdentifier: String) -> [ProcessHistoryPoint] {
+        processHistoryCache[stableIdentifier] ?? []
+    }
+
+    /// 当前持有神经引擎会话的 App 名称。
+    ///
+    /// 返回 nil 表示读不到（界面隐藏整张卡）；返回空数组表示确实没人在用。
+    /// 注意这**不是用量排行**——macOS 不提供按进程的 ANE 用量，只提供谁开着会话。
+    var aneHolderNames: [String]? {
+        guard let pids = aneHolderPIDs else { return nil }
+        let names = pids.compactMap { pid -> String? in
+            if let app = NSRunningApplication(processIdentifier: pid) {
+                return app.localizedName ?? app.bundleIdentifier
+            }
+            // 非 App 的守护进程不在 NSRunningApplication 里，回退到进程采样的结果。
+            if let group = processGroups.first(where: { group in
+                group.primaryPID == pid || group.children.contains { $0.pid == pid }
+            }) {
+                return group.displayName
+            }
+            return "pid \(pid)"
+        }
+        return Array(Set(names)).sorted()
+    }
+
+    /// 真正的整机功耗，只在电池供电时可知。
+    ///
+    /// 接电时 `netPowerWatts` 是充进电芯的电流，`adapterRatedWatts` 是协商上限，
+    /// 两者都不是整机在耗多少电。与其拿一个错答案填上去，不如直说测不了——
+    /// 这正是「虚假报数」的反面。
+    /// 整机功耗,按供电状态分四路取数,每一路都是完整账:
+    /// - 纯电池:|净功率| 就是整机
+    /// - 接电但电池仍在供电:整机 = 电源输入 + 电池放电(审计抓出的关键 bug:
+    ///   旧版只算电池那份,把充电器同时供的整个丢了,必然小于 SoC)
+    /// - 插电不充:电源输入(PDTR)= 整机,电池不进不出
+    /// - 充电中:整机 = 输入 − 充入电池的部分(两个都是测得的,不是「不可测」)
+    var wholeMachineWatts: Double? {
+        let battery = current.battery
+        let dcInput = current.deep.dcInputWatts
+        switch battery.state {
+        case .discharging:
+            guard let net = battery.netPowerWatts, net < 0 else { return nil }
+            return abs(net)
+        case .pluggedDischarging:
+            guard let net = battery.netPowerWatts, net < 0 else { return nil }
+            return abs(net) + (dcInput ?? 0)
+        case .full, .pluggedNotCharging:
+            guard let input = dcInput, input > 0 else { return nil }
+            return input
+        case .charging:
+            guard let input = dcInput, input > 0,
+                  let net = battery.netPowerWatts, net > 0, input > net else { return nil }
+            return input - net
+        case .unknown:
+            return nil
+        }
+    }
+
+    var wholeMachineWattsText: String {
+        guard let watts = wholeMachineWatts else { return "不可用" }
+        // 整机比它自己的子集(SoC 封装)还小,必是不同源瞬时打架:
+        // 宁可不报,不报一个物理上不可能的数。
+        if let package = current.deep.socPower?.packageWatts, watts < package {
+            return "不可用"
+        }
+        return MetricFormat.watts(watts)
+    }
+
+    /// 整机功耗减去 SoC 总功耗，即屏幕与外设的开销。倒挂时返回 nil 而不是负数。
+    var nonSoCWatts: Double? {
+        guard let whole = wholeMachineWatts,
+              let package = current.deep.socPower?.packageWatts,
+              whole >= package
+        else { return nil }
+        return whole - package
+    }
+
+    /// 设置页出现或 App 回到前台时重查通知权限。
+    /// 旧版只在启动时查一次:用户去系统设置授了权回来,App 还显示「已关闭」,
+    /// 且提醒因为同一个陈旧缓存被静默丢弃——绿灯坏灯都可能是假的。
+    func refreshNotificationAuthorization() async {
+        notificationAuthorizationStatus = await notifications.refreshAuthorizationStatus()
+    }
+
+    private static func describe(_ state: UpgradeBackupState) -> String? {
+        switch state {
+        case let .created(url, bytes):
+            let size = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+            return "已保留升级前备份（\(size)）：\(url.lastPathComponent)"
+        case let .alreadyExists(url):
+            return "已保留升级前备份：\(url.lastPathComponent)"
+        case .notNeeded:
+            return nil
+        case let .failed(reason):
+            return "升级前备份失败：\(reason)"
+        }
+    }
+
+    private func updateSamplingMode() {
+        let desired: TimeInterval = activePresentations > 0 ? 2 : 10
+        guard desired != sampleInterval else { return }
+        sampleInterval = desired
+        collector.setSampleInterval(desired)
+        restartSampler()
+    }
+
+    private var processMonitoringEnabled: Bool {
+        UserDefaults.standard.object(forKey: "processMonitoringEnabled") as? Bool ?? true
+    }
+
+    private var processHistoryEnabled: Bool {
+        UserDefaults.standard.object(forKey: "processHistoryEnabled") as? Bool ?? true
+    }
+
+    private var processSampleInterval: TimeInterval {
+        if processPageActive, activePresentations > 0 { return 5 }
+        if activePresentations > 0 { return 15 }
+        return 30
+    }
+
+    private func restartSampler() {
+        guard started, !suspended else { return }
+        samplerTask?.cancel()
+        let interval = sampleInterval
+        samplerTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refresh()
+                try? await Task.sleep(for: .seconds(interval))
+            }
+        }
+    }
+
+    private func restartProcessSampler(resetBaseline: Bool = false) {
+        processSamplerTask?.cancel()
+        processSamplerTask = nil
+        guard started, !suspended, processMonitoringEnabled else {
+            if !processMonitoringEnabled {
+                processMonitorStatus = ProcessMonitorStatus(phase: .disabled)
+            }
+            return
+        }
+
+        let interval = processSampleInterval
+        processMonitorStatus.phase = processGroups.isEmpty ? .starting : processMonitorStatus.phase
+        processSamplerTask = Task { [weak self] in
+            guard let self else { return }
+            if resetBaseline {
+                await processSampler.reset()
+            }
+            while !Task.isCancelled {
+                let result = await processSampler.sample()
+                guard !Task.isCancelled else { return }
+                receiveProcessSample(result)
+                do {
+                    try await Task.sleep(for: .seconds(interval))
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func receiveProcessSample(_ result: ProcessSamplingResult) {
+        processGroups = result.groups
+        processMonitorStatus = result.status
+        guard processHistoryEnabled, let timestamp = result.status.lastUpdated else { return }
+        if let completed = processAggregator.append(
+            timestamp: timestamp,
+            groups: result.groups
+        ) {
+            persistProcessPoints(completed)
+        }
+    }
+
+    private func refresh() async {
+        // refresh 现在有 await，中途会让出 MainActor。采样循环本身是串行的，
+        // 但 restartSampler / resume 可能在旧任务刚过取消检查、正挂在 actor 上时
+        // 起一个新循环——那样两次 refresh 会交错修改 current / liveHistory /
+        // aggregator。用一个重入闸把它挡掉。
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        // 电池读取搬到 actor 上：IORegistry 全树 dump 不再阻塞主线程。
+        // actor 返回的是 Sendable 值类型，CF/NS 类型不跨隔离边界。
+        // 拿不到时退回旧的整树读法，保证任何机型上都不会读不出电池。
+        let battery = await batterySampler.sample() ?? BatteryReader.read()
+        let publicMetrics = fallback.read()
+        var deep = latestDeep
+        let staleAfter = max(12, sampleInterval * 3)
+
+        if let lastCollectorUpdate, Date().timeIntervalSince(lastCollectorUpdate) > staleAfter {
+            latestDeep = DeepMetrics()
+            deep = DeepMetrics()
+            collectorStatus.phase = .reconnecting
+            collectorStatus.lastErrorCode = "collector_stale"
+        }
+
+        if deep.cpuUsagePercent == nil { deep.cpuUsagePercent = publicMetrics.cpuUsagePercent }
+        if deep.thermalLevel == .unknown { deep.thermalLevel = publicMetrics.thermalLevel }
+        deep.collectorAvailable = [.live, .degraded].contains(collectorStatus.phase)
+
+        // 内存与每核占用一律走本机读数，不再和采集器的口径混用。
+        // 原先 mactop 的 `total − (free + inactive)` 与本地的 `active + wired + compressor`
+        // 会随采集器上下线互相顶替，同一时刻的「已用内存」相差约 0.7GB，
+        // 界面上表现为重连一次就跳一次。现在只有一个口径。
+        memory = fallback.memoryBreakdown()
+        if let cores = fallback.perCoreUsage() { perCoreUsage = cores }
+        // 只在芯片页可见时扫 ANE 持有者——这是一次 IORegistry 子树遍历，
+        // 没人看的时候没有理由跑。
+        if visiblePane == .soc {
+            aneHolderPIDs = aneReader.activeClientPIDs()
+        }
+        // 充电链路同理：PD 节点遍历只在电池页或总览可见时跑(总览的
+        // 「充电结论」卡也要它)。外设电量只属于电池页。
+        if batteryPageActive || overviewActive {
+            chargeLink = await chargeLinkSampler.sample()
+        }
+        if batteryPageActive {
+            peripheralBatteries = await peripheralReader.sample()
+        }
+        // 磁盘面板同理:只在磁盘子页可见时刷新。
+        if visiblePane == .disk {
+            diskOverview = DiskStatsReader.read()
+        }
+
+        let snapshot = MetricSnapshot(timestamp: .now, battery: battery, deep: deep)
+        current = snapshot
+        updateRuntimeEstimate(snapshot)
+        isLoading = false
+        notifications.evaluate(snapshot)
+        if let completedMinute = aggregator.append(snapshot) {
+            persist(completedMinute)
+        }
+
+        liveHistory.append(HistoryPoint(snapshot: snapshot))
+        let liveCutoff = Date().addingTimeInterval(-600)
+        liveHistory.removeAll { $0.timestamp < liveCutoff }
+
+    }
+
+    private func persist(_ point: HistoryPoint) {
+        // 学习走分钟均值这条路，绝不用 chartPoints——那里把磁盘分钟均值和
+        // 2–10 秒的实时点串在一起，拿去学会把最近 10 分钟加权约 30 倍。
+        learnFromMinute(point)
+        guard let historyStore else { return }
+        do {
+            try historyStore.save(point)
+            history.append(point)
+            let cutoff = Date().addingTimeInterval(-7 * 86_400)
+            history.removeAll { $0.timestamp < cutoff }
+            try historyStore.prune()
+            if !historyStoreStatus.hasPrefix("已安全迁移") {
+                historyStoreStatus = "历史数据正常"
+            }
+        } catch {
+            historyStoreStatus = "历史数据写入失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func persistProcessPoints(_ points: [ProcessHistoryPoint]) {
+        guard processHistoryEnabled, !points.isEmpty, let processHistoryStore else { return }
+        do {
+            try processHistoryStore.save(points)
+            try processHistoryStore.prune()
+            for point in points where processHistoryCache[point.stableIdentifier] != nil {
+                processHistoryCache[point.stableIdentifier, default: []].append(point)
+                let cutoff = Date().addingTimeInterval(-7 * 86_400)
+                processHistoryCache[point.stableIdentifier]?.removeAll {
+                    $0.timestamp < cutoff
+                }
+            }
+            processHistoryStatus = "重点进程历史正常"
+        } catch {
+            processHistoryStatus = "进程历史写入失败：\(error.localizedDescription)"
+        }
+    }
+}
