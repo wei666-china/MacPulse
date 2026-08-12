@@ -908,6 +908,122 @@ final class DashboardModel: ObservableObject {
         throttleEvents.removeAll { $0 < cutoff }
     }
 
+    /// 汇总全 App 的诊断结论,生成一页可外发的体检报告。
+    /// 各页的判定逻辑都不在这里重写——这里只做收集与排序,
+    /// 任何一条结论变了,报告自动跟着变。
+    func buildHealthReport() -> HealthReport {
+        var items: [HealthReport.Item] = []
+        var missing: [String] = []
+        let battery = current.battery
+        let deep = current.deep
+
+        // 电池健康
+        if let health = battery.healthPercent {
+            let cycles = battery.cycleCount.map { ",循环 \($0) 次" } ?? ""
+            items.append(.init(
+                level: health < 80 ? .warning : .ok,
+                category: "电池健康",
+                summary: "\(Int(health.rounded()))%\(cycles)",
+                detail: health < 80 ? "低于 80% 通常意味着该考虑更换电池了。" : nil
+            ))
+        } else {
+            missing.append("电池健康度")
+        }
+
+        // 充电链路
+        if let verdict = chargeLinkDiagnosis {
+            items.append(.init(
+                level: verdict.isWarning ? .warning : .ok,
+                category: "充电链路",
+                summary: verdict.summary,
+                detail: verdict.isWarning ? verdict.detail : nil
+            ))
+        }
+
+        // 内存
+        if let verdict = memoryDiagnosis {
+            items.append(.init(
+                level: verdict.isWarning ? .warning : (verdict.kind == .comfortable ? .ok : .notice),
+                category: "内存",
+                summary: verdict.summary,
+                detail: verdict.kind == .comfortable ? nil : verdict.detail
+            ))
+        } else {
+            missing.append("内存分项")
+        }
+
+        // 热与降频
+        if let hotspot = deep.hotspotTemperature {
+            let recent = throttleEvents.count
+            items.append(.init(
+                level: recent > 0 ? .notice : .ok,
+                category: "温度",
+                summary: recent > 0
+                    ? String(format: "当前 %.0f°C,本次运行期间热降频 %d 次", hotspot, recent)
+                    : String(format: "当前 %.0f°C,未见热降频", hotspot),
+                detail: recent > 2 ? "频繁降频会持续拖慢性能,改善散热或减少同时运行的重负载可缓解。" : nil
+            ))
+        } else {
+            missing.append("芯片温度")
+        }
+
+        // 睡眠掉电
+        if let session = sleepSessions.first(where: { $0.onBattery }) {
+            let verdict = SleepDiagnosis.diagnose(session)
+            items.append(.init(
+                level: verdict.isWarning ? .warning : .ok,
+                category: "睡眠掉电",
+                summary: verdict.summary,
+                detail: verdict.isWarning ? verdict.detail : nil
+            ))
+        } else {
+            missing.append("睡眠掉电(近期没有电池睡眠记录)")
+        }
+
+        // 存储
+        if let root = diskOverview?.volumes.first(where: \.isRoot) {
+            let freeRatio = Double(root.availableBytes) / Double(max(1, root.totalBytes))
+            items.append(.init(
+                level: freeRatio < 0.1 ? .warning : .ok,
+                category: "存储",
+                summary: "启动卷剩余 \(MetricFormat.storageBytes(UInt64(root.availableBytes))) / 共 \(MetricFormat.storageBytes(UInt64(root.totalBytes)))",
+                detail: freeRatio < 0.1 ? "可用空间低于一成,系统与 App 都会受影响。" : nil
+            ))
+        }
+
+        // 自启项
+        if !backgroundItems.isEmpty {
+            let running = backgroundItems.filter(\.isRunning).count
+            items.append(.init(
+                level: running > 8 ? .notice : .ok,
+                category: "开机自启",
+                summary: "\(backgroundItems.count) 项第三方自启,\(running) 项正在运行",
+                detail: running > 8 ? "自启项越多,开机越慢、后台常驻耗电越多。" : nil
+            ))
+        }
+
+        // 显示器
+        if let limited = displays.first(where: \.isBelowMaxRefresh), let max = limited.maxRefreshHz {
+            items.append(.init(
+                level: .notice,
+                category: "显示器",
+                summary: "「\(limited.name)」跑在 \(Int(limited.refreshHz ?? 0))Hz,低于它支持的 \(Int(max))Hz",
+                detail: "外接屏跑不满通常是线材或转接头带宽不够。"
+            ))
+        }
+
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        return HealthReport(
+            machine: deep.chip?.name ?? "Mac",
+            systemVersion: "macOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
+            appVersion: version,
+            generatedAt: .now,
+            items: items,
+            unavailable: missing
+        )
+    }
+
     /// 睡眠记录后台刷新。读取器内部按 10 分钟节流,这里只管发起,不等结果。
     private func refreshSleepSessions() {
         Task { [weak self] in

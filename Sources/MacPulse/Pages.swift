@@ -1067,6 +1067,9 @@ struct SettingsView: View {
     @State private var launchAtLogin = false
     @State private var loginStatus: LoginItemStatus = .disabled
     @State private var loginError: String?
+    @State private var reportText = ""
+    @State private var showReport = false
+    @State private var copiedAt: Date?
 
     var body: some View {
         ScrollView {
@@ -1170,6 +1173,8 @@ struct SettingsView: View {
                         Slider(value: $alertCooldownMinutes, in: 15...180, step: 15)
                     }
                 }
+
+                healthReportCard
 
                 sensorCoverageCard
 
@@ -1277,6 +1282,55 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             syncLoginItemState()
             Task { await model.refreshNotificationAuthorization() }
+        }
+    }
+
+    /// 一键体检:把全 App 的结论汇成一页可复制文本。
+    /// 生成的报告不含任何标识信息(序列号/网络名/IP/用户名/路径),
+    /// 所以可以放心贴到 issue、论坛或发给朋友。
+    private var healthReportCard: some View {
+        LiquidCard {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(title: "体检报告")
+                Text("把电池、充电、内存、温度、睡眠、存储、自启与显示器的结论汇成一页,可直接复制粘贴。报告不含序列号、网络名称、IP、用户名或文件路径。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    Button {
+                        let report = model.buildHealthReport()
+                        reportText = report.markdown()
+                        showReport = true
+                    } label: {
+                        Label("生成报告", systemImage: "stethoscope")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    if !reportText.isEmpty {
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(reportText, forType: .string)
+                            copiedAt = .now
+                        } label: {
+                            Label(
+                                copiedAt.map { Date().timeIntervalSince($0) < 3 } == true ? "已复制" : "复制",
+                                systemImage: "doc.on.doc"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                if showReport, !reportText.isEmpty {
+                    ScrollView {
+                        Text(reportText)
+                            .font(.system(size: 11, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 260)
+                    .padding(10)
+                    .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+            }
         }
     }
 
