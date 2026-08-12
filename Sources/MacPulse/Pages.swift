@@ -300,33 +300,41 @@ struct OverviewView: View {
         Chart {
                     ForEach(Array(model.liveHistory.suffix(60))) { point in
                         if let power = point.batteryPowerWatts {
+                            // 带符号绘制:零线以上是充入、以下是放出。
+                            // 旧版取绝对值,充电和放电画出来一模一样,方向全丢。
                             LineMark(
                                 x: .value("时间", point.timestamp),
-                                y: .value("功率", abs(power))
+                                y: .value("功率", power)
                             )
                             .interpolationMethod(.catmullRom)
-                            .foregroundStyle(statusColor)
+                            .foregroundStyle(power >= 0 ? MacPulseTheme.normal : MacPulseTheme.ink)
                             .lineStyle(.init(lineWidth: 2.2, lineCap: .round))
 
                             AreaMark(
                                 x: .value("时间", point.timestamp),
-                                y: .value("功率", abs(power))
+                                y: .value("功率", power)
                             )
                             .interpolationMethod(.catmullRom)
                             .foregroundStyle(
                                 LinearGradient(
-                                    colors: [statusColor.opacity(0.28), statusColor.opacity(0)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
+                                    colors: [
+                                        (power >= 0 ? MacPulseTheme.normal : MacPulseTheme.ink).opacity(0.22),
+                                        .clear
+                                    ],
+                                    startPoint: power >= 0 ? .top : .bottom,
+                                    endPoint: power >= 0 ? .bottom : .top
                                 )
                             )
                         }
                     }
+                    RuleMark(y: .value("零", 0))
+                        .foregroundStyle(.secondary.opacity(0.3))
+                        .lineStyle(.init(lineWidth: 0.5, dash: [3, 3]))
                 }
                 .chartXAxis(.hidden)
                 .chartYAxis(.hidden)
                 // 纵轴锁个下限:微瓦级噪声不放大成惊涛骇浪。
-                .chartYScale(domain: 0...max(recentPeakPowerWatts * 1.25, 1))
+                .chartYScale(domain: -max(recentPeakPowerWatts * 1.25, 1)...max(recentPeakPowerWatts * 1.25, 1))
                 .frame(height: 48)
                 .accessibilityLabel("实时电池功率曲线")
     }
@@ -1049,9 +1057,9 @@ struct SettingsView: View {
         guard networkAutoRun else { return "已关闭自动测速，仍可在网络页手动点「重新测速」。" }
         switch NetworkTestTier(rawValue: networkTestTier) ?? .standard {
         case .standard:
-            return "每次约 65 MB。按一天开 10 次估算约 650 MB/天、19 GB/月。"
+            return "每次约 78 MB(含预热块)。按一天开 10 次估算约 780 MB/天、23 GB/月。"
         case .thrifty:
-            return "每次约 14 MB。按一天开 10 次估算约 140 MB/天、4 GB/月。"
+            return "每次约 20 MB(含预热块)。按一天开 10 次估算约 200 MB/天、6 GB/月。"
         case .light:
             return "每次约 35 KB，只测延迟与连通性，不测下载上传速度。"
         }

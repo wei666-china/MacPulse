@@ -675,7 +675,6 @@ private struct ProcessChildRow: View {
     private var childSymbol: String {
         if process.displayName == "MacPulse" { return "waveform.path.ecg" }
         if process.displayName == "MacPulseCollector" { return "sensor.tag.radiowaves.forward" }
-        if process.displayName == "mactop" { return "cpu" }
         return "gearshape.2"
     }
 

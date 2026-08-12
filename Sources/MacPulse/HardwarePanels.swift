@@ -405,7 +405,7 @@ struct MemoryPanelView: View {
             VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(
                     title: "统一内存",
-                    subtitle: MetricFormat.bytes(memory.totalBytes)
+                    subtitle: "已使用 \(MetricFormat.bytes(memory.usedBytes)) / 共 \(MetricFormat.bytes(memory.totalBytes))"
                 )
                 MemoryStackedBar(memory: memory)
                 LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], spacing: 7) {
@@ -590,18 +590,18 @@ struct DiskPanelView: View {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader(
                     title: volume.name,
-                    subtitle: volume.isRoot ? "启动卷" : (volume.isInternal ? "内置" : "外置")
+                    subtitle: "\(volume.isRoot ? "启动卷" : (volume.isInternal ? "内置" : "外置")) · 共 \(MetricFormat.storageBytes(UInt64(volume.totalBytes)))"
                 )
                 VolumeCapacityBar(volume: volume)
                 HStack(spacing: 12) {
                     DiskLegendItem(color: MacPulseTheme.ink, title: "已用",
-                                   bytes: UInt64(volume.exclusiveUsedBytes))
+                                   bytes: UInt64(volume.exclusiveUsedBytes), storage: true)
                     if volume.purgeableBytes > 0 {
                         DiskLegendItem(color: .primary.opacity(0.25), title: "可自动腾出",
-                                       bytes: UInt64(volume.purgeableBytes))
+                                       bytes: UInt64(volume.purgeableBytes), storage: true)
                     }
                     DiskLegendItem(color: .clear, title: "可用",
-                                   bytes: UInt64(volume.availableBytes))
+                                   bytes: UInt64(volume.availableBytes), storage: true)
                 }
                 if volume.purgeableBytes > 0 {
                     Text("「可自动腾出」是缓存与本地快照,系统需要空间时会自己清,不用手动删。")
@@ -631,12 +631,12 @@ struct DiskPanelView: View {
                 )
                 ValueRow(
                     title: "本次开机累计读取",
-                    value: overview.sessionReadBytes.map { MetricFormat.bytes($0) } ?? "不可用",
+                    value: MetricFormat.storageBytes(overview.sessionReadBytes),
                     symbol: "tray.and.arrow.down"
                 )
                 ValueRow(
                     title: "本次开机累计写入",
-                    value: overview.sessionWriteBytes.map { MetricFormat.bytes($0) } ?? "不可用",
+                    value: MetricFormat.storageBytes(overview.sessionWriteBytes),
                     symbol: "tray.and.arrow.up"
                 )
                 // 写入量给参照系,否则「1.2TB」读不出好坏。SSD 写入寿命按 TBW 计,
@@ -707,6 +707,7 @@ private struct DiskLegendItem: View {
     let color: Color
     let title: String
     let bytes: UInt64
+    var storage = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -714,7 +715,7 @@ private struct DiskLegendItem: View {
                 RoundedRectangle(cornerRadius: 2.5).fill(color).frame(width: 9, height: 9)
             }
             Text(title).font(.caption)
-            Text(MetricFormat.bytes(bytes))
+            Text(storage ? MetricFormat.storageBytes(bytes) : MetricFormat.bytes(bytes))
                 .font(.caption.weight(.medium))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -851,6 +852,10 @@ struct ThermalPanelView: View {
                     symbol: "thermometer.high",
                     tint: MacPulseTheme.warm
                 )
+                Text("分组行显示的是该组平均温度;上面的热点是全芯片单点最高值,两者口径不同。")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
                 ValueRow(
                     title: "传感器分组",
                     // 采集器断线时分组为空:「0 组 · 0 个传感器」是假 0,如实说不可用。

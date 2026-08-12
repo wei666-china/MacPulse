@@ -261,6 +261,14 @@ enum MetricFormat {
         return ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .memory)
     }
 
+    /// 存储容量专用:走 .file(十进制 GB),与访达、「关于本机」一个口径。
+    /// 内存那套 .memory 是二进制 GiB,拿来报磁盘会把 512GB 说成 465.6GB,
+    /// 用户拿去和系统对不上账。
+    static func storageBytes(_ value: UInt64?) -> String {
+        guard let value else { return "不可用" }
+        return ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .file)
+    }
+
     static func rate(_ value: Double?) -> String {
         guard let value, value.isFinite else { return "不可用" }
         return ByteCountFormatter.string(fromByteCount: Int64(max(0, value)), countStyle: .file) + "/s"
