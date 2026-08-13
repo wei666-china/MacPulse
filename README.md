@@ -8,7 +8,7 @@ MacPulse 是一款针对 Apple Silicon Mac 的原生菜单栏监控 App。充放
 |---|---|
 | ![总览](docs/images/overview.png) | ![性能](docs/images/performance.png) |
 
-> **状态:3.0.0-beta.1。** 目前只在一台 M5 MacBook Air 上完整实测过;跨机型行为(M1–M4、
+> **状态:3.0.0-beta.2。** 目前只在一台 M5 MacBook Air 上完整实测过;跨机型行为(M1–M4、
 > 带风扇机型)按上游语料与优雅降级设计推断。装好后打开「设置 → 本机传感器覆盖」,
 > 一眼看清你机器上每类数据源的可用情况——报 issue 时请附上这张卡的内容。
 
