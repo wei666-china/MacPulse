@@ -79,11 +79,11 @@ public struct CableEmarkerInfo: Codable, Sendable, Equatable {
         case 2: return "10 Gbps"
         case 3: return "40 Gbps"
         case 4: return "80 Gbps"
-        default: return "未知速度档(\(speedTier))"
+        default: return String(format: String(localized: "未知速度档(%@)"), String(describing: speedTier))
         }
     }
 
-    public var typeLabel: String { isActiveCable ? "主动线" : "被动线" }
+    public var typeLabel: String { isActiveCable ? String(localized: "主动线") : String(localized: "被动线") }
 }
 
 /// PD Discover Identity 的 VDO 位解码。只解我们展示的字段,
@@ -230,8 +230,8 @@ public struct ChargeLinkDiagnosis: Codable, Sendable, Equatable {
         if let cable = snapshot.cable, cable.maxWatts < chargerW {
             return ChargeLinkDiagnosis(
                 kind: .cableLimit,
-                summary: "线缆在拖慢充电",
-                detail: "充电器能给 \(chargerW)W,这根线额定只有 \(cable.maxWatts)W。换根线能充更快。"
+                summary: String(localized: "线缆在拖慢充电"),
+                detail: String(format: String(localized: "充电器能给 %@W,这根线额定只有 %@W。换根线能充更快。"), String(describing: chargerW), String(describing: cable.maxWatts))
             )
         }
 
@@ -239,15 +239,15 @@ public struct ChargeLinkDiagnosis: Codable, Sendable, Equatable {
         if batteryFullyCharged == true {
             return ChargeLinkDiagnosis(
                 kind: .batteryFull,
-                summary: "电池已满,不在取电",
-                detail: "充电器和线都没问题。需要时 Mac 最高可以取 \(chargerW)W。"
+                summary: String(localized: "电池已满,不在取电"),
+                detail: String(format: String(localized: "充电器和线都没问题。需要时 Mac 最高可以取 %@W。"), String(describing: chargerW))
             )
         }
         if batteryIsCharging == false, negotiatedW != nil {
             return ChargeLinkDiagnosis(
                 kind: .onHold,
-                summary: "已插电,充电暂停中",
-                detail: "充电器和线都没问题。macOS 暂停了充电(通常是充电上限或优化充电),整机仍从充电器取电。"
+                summary: String(localized: "已插电,充电暂停中"),
+                detail: String(localized: "充电器和线都没问题。macOS 暂停了充电(通常是充电上限或优化充电),整机仍从充电器取电。")
             )
         }
 
@@ -265,8 +265,8 @@ public struct ChargeLinkDiagnosis: Codable, Sendable, Equatable {
            top.maxCurrentMA >= n.maxCurrentMA + 500 {
             return ChargeLinkDiagnosis(
                 kind: .cableLimitSuspected,
-                summary: "疑似线缆在限速",
-                detail: "这根线没有身份芯片,按协议只能按 3A 走。充电器在 \(top.voltsLabel) 档还能给更多电流,若想跑满建议换带芯片的线。"
+                summary: String(localized: "疑似线缆在限速"),
+                detail: String(format: String(localized: "这根线没有身份芯片,按协议只能按 3A 走。充电器在 %@ 档还能给更多电流,若想跑满建议换带芯片的线。"), String(describing: top.voltsLabel))
             )
         }
 
@@ -276,8 +276,8 @@ public struct ChargeLinkDiagnosis: Codable, Sendable, Equatable {
         if let n = negotiatedW, n < chargerW - margin {
             return ChargeLinkDiagnosis(
                 kind: .macLimit,
-                summary: "正在以 \(n)W 充电(充电器上限 \(chargerW)W)",
-                detail: "充电器和线都有余量,是 Mac 当前要得少。电池快满或系统空闲时这是正常现象。"
+                summary: String(format: String(localized: "正在以 %@W 充电(充电器上限 %@W)"), String(describing: n), String(describing: chargerW)),
+                detail: String(localized: "充电器和线都有余量,是 Mac 当前要得少。电池快满或系统空闲时这是正常现象。")
             )
         }
 
@@ -285,15 +285,15 @@ public struct ChargeLinkDiagnosis: Codable, Sendable, Equatable {
         if let n = negotiatedW {
             return ChargeLinkDiagnosis(
                 kind: .fine,
-                summary: "满速协商 · 最高 \(n)W",
-                detail: "充电器和线缆匹配良好,Mac 按需取电,上限就是这个数。"
+                summary: String(format: String(localized: "满速协商 · 最高 %@W"), String(describing: n)),
+                detail: String(localized: "充电器和线缆匹配良好,Mac 按需取电,上限就是这个数。")
             )
         }
 
         return ChargeLinkDiagnosis(
             kind: .chargerCeiling,
-            summary: "充电器上限 \(chargerW)W",
-            detail: "协商还没完成,稍等片刻再看。"
+            summary: String(format: String(localized: "充电器上限 %@W"), String(describing: chargerW)),
+            detail: String(localized: "协商还没完成,稍等片刻再看。")
         )
     }
 }

@@ -118,7 +118,7 @@ struct BatteryRing: View {
         }
         .frame(width: 104, height: 104)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("电池电量 \(Int(percentage.rounded()))%")
+        .accessibilityLabel(String(format: String(localized: "电池电量 %@%%"), String(describing: Int(percentage.rounded()))))
     }
 }
 
@@ -242,22 +242,22 @@ struct EmptyMetric: View {
 
 enum MetricFormat {
     static func watts(_ value: Double?, signed: Bool = false) -> String {
-        guard let value, value.isFinite else { return "不可用" }
+        guard let value, value.isFinite else { return String(localized: "不可用") }
         return String(format: signed ? "%+.1f W" : "%.1f W", value)
     }
 
     static func temperature(_ value: Double?) -> String {
-        guard let value, value.isFinite else { return "不可用" }
+        guard let value, value.isFinite else { return String(localized: "不可用") }
         return String(format: "%.1f°C", value)
     }
 
     static func percent(_ value: Double?) -> String {
-        guard let value, value.isFinite else { return "不可用" }
+        guard let value, value.isFinite else { return String(localized: "不可用") }
         return String(format: "%.0f%%", value)
     }
 
     static func bytes(_ value: UInt64?) -> String {
-        guard let value else { return "不可用" }
+        guard let value else { return String(localized: "不可用") }
         return ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .memory)
     }
 
@@ -265,12 +265,12 @@ enum MetricFormat {
     /// 内存那套 .memory 是二进制 GiB,拿来报磁盘会把 512GB 说成 465.6GB,
     /// 用户拿去和系统对不上账。
     static func storageBytes(_ value: UInt64?) -> String {
-        guard let value else { return "不可用" }
+        guard let value else { return String(localized: "不可用") }
         return ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .file)
     }
 
     static func rate(_ value: Double?) -> String {
-        guard let value, value.isFinite else { return "不可用" }
+        guard let value, value.isFinite else { return String(localized: "不可用") }
         return ByteCountFormatter.string(fromByteCount: Int64(max(0, value)), countStyle: .file) + "/s"
     }
 
@@ -280,7 +280,7 @@ enum MetricFormat {
     /// 各进程之和不等于系统 GPU 活跃度（合成器与驱动的开销落在别处）。
     /// 报一个看起来像占用率的数字会暗示一种并不存在的精度。
     static func gpuTime(_ nanosecondsPerSecond: Double?) -> String {
-        guard let value = nanosecondsPerSecond, value.isFinite else { return "不可用" }
+        guard let value = nanosecondsPerSecond, value.isFinite else { return String(localized: "不可用") }
         let milliseconds = max(0, value) / 1_000_000
         if milliseconds < 1 { return String(format: "%.2f ms/s", milliseconds) }
         return String(format: "%.0f ms/s", milliseconds)
@@ -289,7 +289,7 @@ enum MetricFormat {
     /// 内存/ANE 带宽，读写合计。
     static func gigabytesPerSecond(_ read: Double?, _ write: Double?) -> String {
         let total = (read ?? 0) + (write ?? 0)
-        guard read != nil || write != nil else { return "不可用" }
+        guard read != nil || write != nil else { return String(localized: "不可用") }
         return String(format: "%.1f GB/s", total)
     }
 
@@ -301,7 +301,7 @@ enum MetricFormat {
         unsupported: Bool
     ) -> String {
         if available { return formatted() }
-        return unsupported ? "本机型不提供" : "不可用"
+        return unsupported ? String(localized: "本机型不提供") : String(localized: "不可用")
     }
 
     /// 缺失时说「不可用」，和 `MetricFormat` 其余部分一致。
@@ -310,9 +310,9 @@ enum MetricFormat {
     /// 真的还在积累数据、读数确实不可用、以及接电时系统返回 Unlimited。
     /// 第三种情况让充电界面永远显示「预计 正在估算 充满」。
     static func duration(_ minutes: Int?) -> String {
-        guard let minutes, minutes > 0 else { return "不可用" }
-        if minutes < 60 { return "\(minutes) 分钟" }
-        return "\(minutes / 60) 小时 \(minutes % 60) 分"
+        guard let minutes, minutes > 0 else { return String(localized: "不可用") }
+        if minutes < 60 { return String(format: String(localized: "%@ 分钟"), String(describing: minutes)) }
+        return String(format: String(localized: "%@ 小时 %@ 分"), String(describing: minutes / 60), String(describing: minutes % 60))
     }
 
     /// 续航估算的主文案。低置信度时给区间而不是点值。
@@ -322,21 +322,21 @@ enum MetricFormat {
                let low = estimate.lowMinutes,
                let high = estimate.highMinutes,
                high > low {
-                return "约 \(hoursText(low))–\(hoursText(high))"
+                return String(format: String(localized: "约 %@–%@"), String(describing: hoursText(low)), String(describing: hoursText(high)))
             }
             return duration(minutes)
         }
-        return "数据不足"
+        return String(localized: "数据不足")
     }
 
     private static func hoursText(_ minutes: Int) -> String {
-        if minutes < 60 { return "\(minutes) 分钟" }
+        if minutes < 60 { return String(format: String(localized: "%@ 分钟"), String(describing: minutes)) }
         let hours = Double(minutes) / 60
-        return String(format: "%.1f 小时", hours)
+        return String(format: String(localized: "%.1f 小时"), hours)
     }
 
     static func runtimeBasis(_ estimate: RuntimeEstimate) -> String {
-        guard estimate.minutes != nil else { return "正在积累用量数据" }
+        guard estimate.minutes != nil else { return String(localized: "正在积累用量数据") }
         return "\(estimate.basis.title) · \(estimate.confidence.title)"
     }
 }

@@ -22,11 +22,11 @@ public struct UsageContext: Codable, Sendable, Equatable, Hashable {
 
         public var title: String {
             switch self {
-            case .idle: "几乎空闲"
-            case .light: "轻负载"
-            case .moderate: "中等负载"
-            case .heavy: "重负载"
-            case .intense: "满载"
+            case .idle: String(localized: "几乎空闲")
+            case .light: String(localized: "轻负载")
+            case .moderate: String(localized: "中等负载")
+            case .heavy: String(localized: "重负载")
+            case .intense: String(localized: "满载")
             }
         }
     }
@@ -48,10 +48,10 @@ public struct UsageContext: Codable, Sendable, Equatable, Hashable {
 
         public var title: String {
             switch self {
-            case .asleep: "屏幕关闭"
-            case .low: "低亮度"
-            case .medium: "中等亮度"
-            case .high: "高亮度"
+            case .asleep: String(localized: "屏幕关闭")
+            case .low: String(localized: "低亮度")
+            case .medium: String(localized: "中等亮度")
+            case .high: String(localized: "高亮度")
             }
         }
     }

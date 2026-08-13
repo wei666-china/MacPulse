@@ -106,9 +106,9 @@ public struct ChipIdentity: Codable, Sendable, Equatable {
     public var coreLayoutDescription: String? {
         guard let coreCount else { return nil }
         if let eCoreCount, let pCoreCount, eCoreCount + pCoreCount <= coreCount {
-            return "\(coreCount) 核（\(eCoreCount) 能效 + \(pCoreCount) 性能）"
+            return String(format: String(localized: "%@ 核（%@ 能效 + %@ 性能）"), String(describing: coreCount), String(describing: eCoreCount), String(describing: pCoreCount))
         }
-        return "\(coreCount) 核"
+        return String(format: String(localized: "%@ 核"), String(describing: coreCount))
     }
 }
 
@@ -176,22 +176,22 @@ public enum ThermalGroupKind: String, Codable, Sendable, Equatable, CaseIterable
 
     public var title: String {
         switch self {
-        case .cpuECore: "CPU 能效核"
-        case .cpuPCore: "CPU 性能核"
-        case .cpuDie: "CPU 裸片"
+        case .cpuECore: String(localized: "CPU 能效核")
+        case .cpuPCore: String(localized: "CPU 性能核")
+        case .cpuDie: String(localized: "CPU 裸片")
         case .gpu: "GPU"
-        case .socPackage: "SoC 封装"
-        case .memory: "内存"
-        case .ssd: "固态硬盘"
-        case .nand: "闪存颗粒"
-        case .nvme: "NVMe 控制器"
-        case .ambient: "机内环境"
-        case .vrm: "供电模块"
-        case .board: "主板"
-        case .thunderbolt: "雷雳"
-        case .wireless: "无线模块"
-        case .display: "屏幕"
-        case .other: "其他"
+        case .socPackage: String(localized: "SoC 封装")
+        case .memory: String(localized: "内存")
+        case .ssd: String(localized: "固态硬盘")
+        case .nand: String(localized: "闪存颗粒")
+        case .nvme: String(localized: "NVMe 控制器")
+        case .ambient: String(localized: "机内环境")
+        case .vrm: String(localized: "供电模块")
+        case .board: String(localized: "主板")
+        case .thunderbolt: String(localized: "雷雳")
+        case .wireless: String(localized: "无线模块")
+        case .display: String(localized: "屏幕")
+        case .other: String(localized: "其他")
         }
     }
 
@@ -223,9 +223,9 @@ public enum SensorAvailabilityKey {
 
     public static func title(for key: String) -> String {
         switch key {
-        case dramBandwidth: "内存带宽"
-        case aneBandwidth: "神经引擎带宽"
-        case fans: "风扇"
+        case dramBandwidth: String(localized: "内存带宽")
+        case aneBandwidth: String(localized: "神经引擎带宽")
+        case fans: String(localized: "风扇")
         default: key
         }
     }

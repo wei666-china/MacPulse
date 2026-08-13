@@ -13,11 +13,11 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .netPower: "电池净功率"
-        case .hotspotTemperature: "热点温度"
-        case .batteryPercent: "电量百分比"
-        case .socPower: "SoC 总功耗"
-        case .memoryPercent: "内存占用"
+        case .netPower: String(localized: "电池净功率")
+        case .hotspotTemperature: String(localized: "热点温度")
+        case .batteryPercent: String(localized: "电量百分比")
+        case .socPower: String(localized: "SoC 总功耗")
+        case .memoryPercent: String(localized: "内存占用")
         }
     }
 
@@ -40,9 +40,9 @@ enum MenuBarDisplayMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .standard: "自选指标"
-        case .compact: "紧凑"
-        case .iconOnly: "仅图标"
+        case .standard: String(localized: "自选指标")
+        case .compact: String(localized: "紧凑")
+        case .iconOnly: String(localized: "仅图标")
         }
     }
 }

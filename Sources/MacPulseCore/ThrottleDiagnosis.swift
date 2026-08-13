@@ -98,8 +98,8 @@ public struct ThrottleDiagnosis: Codable, Sendable, Equatable {
         guard active >= busyThreshold else {
             return ThrottleDiagnosis(
                 kind: .idle,
-                summary: "性能未受限",
-                detail: "当前负载不高,频率随需求浮动是正常省电行为。要看是否被限速,请在高负载时查看。",
+                summary: String(localized: "性能未受限"),
+                detail: String(localized: "当前负载不高,频率随需求浮动是正常省电行为。要看是否被限速,请在高负载时查看。"),
                 frequencyHeadroomPercent: headroom
             )
         }
@@ -107,8 +107,8 @@ public struct ThrottleDiagnosis: Codable, Sendable, Equatable {
         guard ratio < fullSpeedRatio else {
             return ThrottleDiagnosis(
                 kind: .fullSpeed,
-                summary: "满速运行",
-                detail: "芯片在满负载下跑到了 \(freq) MHz(最高 \(maxFreq) MHz),没有受到限制。",
+                summary: String(localized: "满速运行"),
+                detail: String(format: String(localized: "芯片在满负载下跑到了 %@ MHz(最高 %@ MHz),没有受到限制。"), String(describing: freq), String(describing: maxFreq)),
                 frequencyHeadroomPercent: headroom
             )
         }
@@ -119,11 +119,11 @@ public struct ThrottleDiagnosis: Codable, Sendable, Equatable {
             || input.thermalLevel == .serious || input.thermalLevel == .critical
 
         if hot {
-            let tempText = input.hotspotTemperature.map { String(format: "%.0f°C", $0) } ?? "偏高"
+            let tempText = input.hotspotTemperature.map { String(format: "%.0f°C", $0) } ?? String(localized: "偏高")
             return ThrottleDiagnosis(
                 kind: .thermal,
-                summary: "正在热降频",
-                detail: "芯片温度 \(tempText),系统主动把频率压到最高档的 \(Int(headroom))% 以保护硬件。改善散热(垫高、清灰、离开高温环境)可以恢复性能。",
+                summary: String(localized: "正在热降频"),
+                detail: String(format: String(localized: "芯片温度 %@,系统主动把频率压到最高档的 %@%% 以保护硬件。改善散热(垫高、清灰、离开高温环境)可以恢复性能。"), String(describing: tempText), String(describing: Int(headroom))),
                 frequencyHeadroomPercent: headroom
             )
         }
@@ -131,8 +131,8 @@ public struct ThrottleDiagnosis: Codable, Sendable, Equatable {
         if input.lowPowerModeEnabled {
             return ThrottleDiagnosis(
                 kind: .lowPowerMode,
-                summary: "低电量模式限速中",
-                detail: "你开着低电量模式,系统按设定压低了频率(当前为最高档的 \(Int(headroom))%)。关掉它即可恢复满速。",
+                summary: String(localized: "低电量模式限速中"),
+                detail: String(format: String(localized: "你开着低电量模式,系统按设定压低了频率(当前为最高档的 %@%%)。关掉它即可恢复满速。"), String(describing: Int(headroom))),
                 frequencyHeadroomPercent: headroom
             )
         }
@@ -142,16 +142,22 @@ public struct ThrottleDiagnosis: Codable, Sendable, Equatable {
         if active >= powerLimitBusyThreshold, ratio < powerLimitRatio {
             return ThrottleDiagnosis(
                 kind: .powerLimit,
-                summary: "频率受限,但机器不热",
-                detail: "芯片持续满载却只跑到最高档的 \(Int(headroom))%,温度也不高——通常是功耗上限所致\(input.onBattery ? "(电池供电时上限更低,插电可缓解)" : ",也可能是充电器供电不足")。",
+                summary: String(localized: "频率受限,但机器不热"),
+                detail: String(
+                    format: String(localized: "芯片持续满载却只跑到最高档的 %@%%,温度也不高——通常是功耗上限所致%@。"),
+                    String(describing: Int(headroom)),
+                    input.onBattery
+                        ? String(localized: "(电池供电时上限更低,插电可缓解)")
+                        : String(localized: ",也可能是充电器供电不足")
+                ),
                 frequencyHeadroomPercent: headroom
             )
         }
 
         return ThrottleDiagnosis(
             kind: .fullSpeed,
-            summary: "性能未受限",
-            detail: "当前负载下频率随需求浮动(最高档的 \(Int(headroom))%)。突发型任务的平均频率天然低于峰值,这不代表被限速。",
+            summary: String(localized: "性能未受限"),
+            detail: String(format: String(localized: "当前负载下频率随需求浮动(最高档的 %@%%)。突发型任务的平均频率天然低于峰值,这不代表被限速。"), String(describing: Int(headroom))),
             frequencyHeadroomPercent: headroom
         )
     }

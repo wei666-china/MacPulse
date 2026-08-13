@@ -72,8 +72,8 @@ public struct SleepDiagnosis: Codable, Sendable, Equatable {
         guard session.onBattery else {
             return SleepDiagnosis(
                 kind: .onPower,
-                summary: "接电睡眠",
-                detail: "这段睡眠一直接着电源,掉电数据不反映待机耗电。要看待机表现,请在纯电池状态下合盖。"
+                summary: String(localized: "接电睡眠"),
+                detail: String(localized: "这段睡眠一直接着电源,掉电数据不反映待机耗电。要看待机表现,请在纯电池状态下合盖。")
             )
         }
 
@@ -85,25 +85,25 @@ public struct SleepDiagnosis: Codable, Sendable, Equatable {
         guard drain > healthyDrainPerHour else {
             return SleepDiagnosis(
                 kind: .healthy,
-                summary: "待机正常",
-                detail: "睡了 \(hoursText) 小时掉 \(session.droppedPercent)%(每小时 \(drainText)%),属于正常范围。"
+                summary: String(localized: "待机正常"),
+                detail: String(format: String(localized: "睡了 %@ 小时掉 %@%%(每小时 %@%%),属于正常范围。"), String(describing: hoursText), String(describing: session.droppedPercent), String(describing: drainText))
             )
         }
 
         if wakes > noisyWakesPerHour {
             let top = session.wakeReasons.max { $0.value < $1.value }
-            let culprit = top.map { "\($0.key)(\($0.value) 次)" } ?? "多个来源"
+            let culprit = top.map { String(format: String(localized: "%@(%@ 次)"), String(describing: $0.key), String(describing: $0.value)) } ?? String(localized: "多个来源")
             return SleepDiagnosis(
                 kind: .tooManyWakes,
-                summary: "被频繁唤醒,待机掉电偏快",
-                detail: "睡了 \(hoursText) 小时掉 \(session.droppedPercent)%(每小时 \(drainText)%),期间被唤醒 \(session.darkWakeCount) 次,最多的是\(culprit)。合盖后仍被反复叫醒会持续耗电——可在「系统设置 → 电池 → 选项」里关掉唤醒网络访问试试。"
+                summary: String(localized: "被频繁唤醒,待机掉电偏快"),
+                detail: String(format: String(localized: "睡了 %@ 小时掉 %@%%(每小时 %@%%),期间被唤醒 %@ 次,最多的是%@。合盖后仍被反复叫醒会持续耗电——可在「系统设置 → 电池 → 选项」里关掉唤醒网络访问试试。"), String(describing: hoursText), String(describing: session.droppedPercent), String(describing: drainText), String(describing: session.darkWakeCount), String(describing: culprit))
             )
         }
 
         return SleepDiagnosis(
             kind: .fastDrain,
-            summary: "待机掉电偏快",
-            detail: "睡了 \(hoursText) 小时掉 \(session.droppedPercent)%(每小时 \(drainText)%),但唤醒只有 \(session.darkWakeCount) 次——耗电多半不在唤醒上,常见于外接设备持续取电,或睡前有任务没跑完。"
+            summary: String(localized: "待机掉电偏快"),
+            detail: String(format: String(localized: "睡了 %@ 小时掉 %@%%(每小时 %@%%),但唤醒只有 %@ 次——耗电多半不在唤醒上,常见于外接设备持续取电,或睡前有任务没跑完。"), String(describing: hoursText), String(describing: session.droppedPercent), String(describing: drainText), String(describing: session.darkWakeCount))
         )
     }
 }
@@ -115,22 +115,22 @@ public enum SleepLogParser {
     /// `due to smc.sysState.Wake(0x70070000) wifibt SMC.OutboxNotEmpty`,
     /// 直接展示等于没说,按关键词归成用户能行动的几类。
     static let reasonMap: [(keyword: String, label: String)] = [
-        ("HID Activity", "你的操作"),
-        ("USB-C_plug", "USB-C 插拔"),
-        ("Clamshell", "开合盖"),
-        ("wifibt", "网络与蓝牙"),
-        ("TCPKeepAlive", "网络保活"),
-        ("dasd", "系统维护任务"),
-        ("RTC", "定时唤醒"),
-        ("PMU", "电源管理"),
-        ("SPMI", "硬件传感器")
+        ("HID Activity", String(localized: "你的操作")),
+        ("USB-C_plug", String(localized: "USB-C 插拔")),
+        ("Clamshell", String(localized: "开合盖")),
+        ("wifibt", String(localized: "网络与蓝牙")),
+        ("TCPKeepAlive", String(localized: "网络保活")),
+        ("dasd", String(localized: "系统维护任务")),
+        ("RTC", String(localized: "定时唤醒")),
+        ("PMU", String(localized: "电源管理")),
+        ("SPMI", String(localized: "硬件传感器"))
     ]
 
     static func classifyReason(_ description: String) -> String {
         for entry in reasonMap where description.contains(entry.keyword) {
             return entry.label
         }
-        return "其他"
+        return String(localized: "其他")
     }
 
     /// 从日志行还原睡眠会话。只收满 30 分钟以上的段——

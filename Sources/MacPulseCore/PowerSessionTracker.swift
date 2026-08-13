@@ -208,9 +208,9 @@ public struct PowerSessionTracker: Sendable {
 
         public var summary: String {
             guard sessionCount > 0, checkpointCount > 0 else {
-                return "还在积累实测样本（已完成 \(sessionCount) 次完整放电）"
+                return String(format: String(localized: "还在积累实测样本（已完成 %@ 次完整放电）"), String(describing: sessionCount))
             }
-            return "最近 \(sessionCount) 次实测平均误差 \(Int(meanAbsoluteErrorMinutes.rounded())) 分钟"
+            return String(format: String(localized: "最近 %@ 次实测平均误差 %@ 分钟"), String(describing: sessionCount), String(describing: Int(meanAbsoluteErrorMinutes.rounded())))
         }
     }
 

@@ -8,10 +8,10 @@ public enum NetworkInterfaceKind: String, Codable, Sendable {
     public var title: String {
         switch self {
         case .wifi: "Wi-Fi"
-        case .ethernet: "以太网"
-        case .cellular: "蜂窝"
-        case .loopback: "回环"
-        case .other: "其他"
+        case .ethernet: String(localized: "以太网")
+        case .cellular: String(localized: "蜂窝")
+        case .loopback: String(localized: "回环")
+        case .other: String(localized: "其他")
         }
     }
 }
@@ -162,17 +162,17 @@ public enum NetworkTestTier: String, Codable, Sendable, CaseIterable, Identifiab
 
     public var title: String {
         switch self {
-        case .light: "轻量"
-        case .standard: "标准"
-        case .thrifty: "节省流量"
+        case .light: String(localized: "轻量")
+        case .standard: String(localized: "标准")
+        case .thrifty: String(localized: "节省流量")
         }
     }
 
     public var dataCostDescription: String {
         switch self {
-        case .light: "约 35 KB"
-        case .standard: "约 65 MB"
-        case .thrifty: "约 14 MB"
+        case .light: String(localized: "约 35 KB")
+        case .standard: String(localized: "约 65 MB")
+        case .thrifty: String(localized: "约 14 MB")
         }
     }
 }
@@ -199,10 +199,10 @@ public enum NetworkConnectivity: String, Codable, Sendable {
 
     public var title: String {
         switch self {
-        case .online: "正常"
-        case .captivePortalSuspected: "疑似需要网页登录"
-        case .dnsFailure: "域名解析失败"
-        case .offline: "离线"
+        case .online: String(localized: "正常")
+        case .captivePortalSuspected: String(localized: "疑似需要网页登录")
+        case .dnsFailure: String(localized: "域名解析失败")
+        case .offline: String(localized: "离线")
         }
     }
 }
@@ -320,15 +320,15 @@ public enum NetworkSkipReason: String, Codable, Sendable, Equatable {
     /// 每一条都要能显示给用户看。静默跳过等于让人以为测过了。
     public var title: String {
         switch self {
-        case .needsConsent: "尚未开启网络测速"
-        case .userDeclined: "网络测速已关闭"
-        case .offline: "当前离线"
-        case .alreadyRunning: "正在测速"
-        case .tooSoon: "刚测过，稍后自动重测"
-        case .meteredNetwork: "已跳过完整测速：按流量计费网络"
-        case .lowDataMode: "已跳过完整测速：低数据模式"
-        case .lowBattery: "已跳过完整测速：电量偏低"
-        case .thermalPressure: "已跳过完整测速：机器过热"
+        case .needsConsent: String(localized: "尚未开启网络测速")
+        case .userDeclined: String(localized: "网络测速已关闭")
+        case .offline: String(localized: "当前离线")
+        case .alreadyRunning: String(localized: "正在测速")
+        case .tooSoon: String(localized: "刚测过，稍后自动重测")
+        case .meteredNetwork: String(localized: "已跳过完整测速：按流量计费网络")
+        case .lowDataMode: String(localized: "已跳过完整测速：低数据模式")
+        case .lowBattery: String(localized: "已跳过完整测速：电量偏低")
+        case .thermalPressure: String(localized: "已跳过完整测速：机器过热")
         }
     }
 }
@@ -532,10 +532,10 @@ public enum NetworkMath {
     public static func bufferbloatGrade(_ milliseconds: Double?) -> String? {
         guard let milliseconds, milliseconds.isFinite else { return nil }
         switch milliseconds {
-        case ..<30: return "A · 几乎无排队"
-        case ..<60: return "B · 轻微"
-        case ..<150: return "C · 明显"
-        default: return "D · 严重"
+        case ..<30: return String(localized: "A · 几乎无排队")
+        case ..<60: return String(localized: "B · 轻微")
+        case ..<150: return String(localized: "C · 明显")
+        default: return String(localized: "D · 严重")
         }
     }
 
@@ -546,16 +546,16 @@ public enum NetworkMath {
 
     /// 「3 分钟前测得」。永远不要把过期数字当现值展示。
     public static func ageDescription(_ completedAt: Date?, now: Date) -> String {
-        guard let completedAt else { return "尚未测速" }
+        guard let completedAt else { return String(localized: "尚未测速") }
         let seconds = max(0, now.timeIntervalSince(completedAt))
-        if seconds < 60 { return "刚刚测得" }
-        if seconds < 3_600 { return "\(Int(seconds / 60)) 分钟前测得" }
-        if seconds < 86_400 { return "\(Int(seconds / 3_600)) 小时前测得" }
-        return "\(Int(seconds / 86_400)) 天前测得"
+        if seconds < 60 { return String(localized: "刚刚测得") }
+        if seconds < 3_600 { return String(format: String(localized: "%@ 分钟前测得"), String(describing: Int(seconds / 60))) }
+        if seconds < 86_400 { return String(format: String(localized: "%@ 小时前测得"), String(describing: Int(seconds / 3_600))) }
+        return String(format: String(localized: "%@ 天前测得"), String(describing: Int(seconds / 86_400)))
     }
 
     public static func megabitsPerSecond(_ bitsPerSecond: Double?) -> String {
-        guard let bitsPerSecond, bitsPerSecond.isFinite, bitsPerSecond > 0 else { return "不可用" }
+        guard let bitsPerSecond, bitsPerSecond.isFinite, bitsPerSecond > 0 else { return String(localized: "不可用") }
         let mbps = bitsPerSecond / 1_000_000
         if mbps < 10 { return String(format: "%.1f Mbps", mbps) }
         return String(format: "%.0f Mbps", mbps)

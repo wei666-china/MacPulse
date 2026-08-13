@@ -10,12 +10,12 @@ public enum ChargeState: String, Codable, Sendable {
 
     public var title: String {
         switch self {
-        case .charging: "正在充电"
-        case .discharging: "正在使用电池"
-        case .pluggedDischarging: "已接电，电池仍在供电"
-        case .pluggedNotCharging: "已接入电源"
-        case .full: "电池已充满"
-        case .unknown: "状态未知"
+        case .charging: String(localized: "正在充电")
+        case .discharging: String(localized: "正在使用电池")
+        case .pluggedDischarging: String(localized: "已接电，电池仍在供电")
+        case .pluggedNotCharging: String(localized: "已接入电源")
+        case .full: String(localized: "电池已充满")
+        case .unknown: String(localized: "状态未知")
         }
     }
 
@@ -47,11 +47,11 @@ public enum ThermalLevel: String, Codable, Sendable {
 
     public var title: String {
         switch self {
-        case .nominal: "正常"
-        case .fair: "偏热"
-        case .serious: "较热"
-        case .critical: "严重"
-        case .unknown: "未知"
+        case .nominal: String(localized: "正常")
+        case .fair: String(localized: "偏热")
+        case .serious: String(localized: "较热")
+        case .critical: String(localized: "严重")
+        case .unknown: String(localized: "未知")
         }
     }
 }

@@ -13,10 +13,10 @@ public enum RuntimeBasis: String, Codable, Sendable, CaseIterable {
 
     public var title: String {
         switch self {
-        case .instant: "按当前负载"
-        case .learned: "按你的日常习惯"
-        case .gauge: "电池计量芯片"
-        case .blended: "综合估算"
+        case .instant: String(localized: "按当前负载")
+        case .learned: String(localized: "按你的日常习惯")
+        case .gauge: String(localized: "电池计量芯片")
+        case .blended: String(localized: "综合估算")
         }
     }
 }
@@ -26,9 +26,9 @@ public enum RuntimeConfidence: String, Codable, Sendable {
 
     public var title: String {
         switch self {
-        case .high: "置信度高"
-        case .medium: "置信度中"
-        case .low: "负载波动较大，给出区间"
+        case .high: String(localized: "置信度高")
+        case .medium: String(localized: "置信度中")
+        case .low: String(localized: "负载波动较大，给出区间")
         }
     }
 }

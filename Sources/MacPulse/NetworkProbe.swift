@@ -231,7 +231,7 @@ actor NetworkProbe {
             path: path
         )
 
-        onProgress(.phase("检查连通性"))
+        onProgress(.phase(String(localized: "检查连通性")))
         result.connectivity = await withTimeout(8, fallback: NetworkConnectivity.offline) {
             await checkConnectivity()
         }
@@ -242,11 +242,11 @@ actor NetworkProbe {
             return result
         }
 
-        onProgress(.phase("测量延迟"))
+        onProgress(.phase(String(localized: "测量延迟")))
         let idleLatency = await measureLatency(count: plan.latencySampleCount, intervalMilliseconds: plan.latencyIntervalMilliseconds)
         result.latency = idleLatency
 
-        onProgress(.phase("握手分解"))
+        onProgress(.phase(String(localized: "握手分解")))
         let header = await probeHeaders()
         result.serverColo = header.colo
         result.dnsMilliseconds = header.dns
@@ -282,7 +282,7 @@ actor NetworkProbe {
 
         // 热身探测：整块丢弃，唯一作用是把这几条连接的拥塞窗口撑开，
         // 并给出定尺寸用的速率。
-        onProgress(.phase("热身"))
+        onProgress(.phase(String(localized: "热身")))
         let warmUp = await withTimeout(20, fallback: ChunkOutcome(bitsPerSecond: nil, bytes: 0)) {
             await measureDownloadChunk(
                 bytes: 3_000_000,
@@ -312,7 +312,7 @@ actor NetworkProbe {
                 break
             }
 
-            onProgress(.phase("测量下载"))
+            onProgress(.phase(String(localized: "测量下载")))
             onProgress(.fraction(Double(chunk) / Double(max(1, plan.measurementChunks))))
 
             let perStream = NetworkMath.nextChunkBytes(
@@ -354,7 +354,7 @@ actor NetworkProbe {
         }
 
         if !Task.isCancelled, result.completeness == .complete, plan.uploadStreams > 0 {
-            onProgress(.phase("测量上传"))
+            onProgress(.phase(String(localized: "测量上传")))
             let upload = await withTimeout(
                 plan.measurementSeconds * 6 + 15,
                 fallback: UploadOutcome(estimate: nil, bytes: 0)

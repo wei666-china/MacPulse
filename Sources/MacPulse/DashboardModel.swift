@@ -35,7 +35,7 @@ final class DashboardModel: ObservableObject {
     @Published private(set) var lastCollectorUpdate: Date?
     @Published private(set) var collectorStatus = CollectorStatus()
     @Published private(set) var sampleInterval: TimeInterval = 10
-    @Published private(set) var historyStoreStatus = "正在准备历史数据"
+    @Published private(set) var historyStoreStatus = String(localized: "正在准备历史数据")
     /// 升级前备份的结果。nil 表示无需备份（全新安装），不显示这一行。
     @Published private(set) var historyBackupStatus: String?
     /// 统一内存分项。本机直接读取，与采集器状态无关。
@@ -85,7 +85,7 @@ final class DashboardModel: ObservableObject {
     @Published private(set) var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
     @Published private(set) var processGroups: [ProcessGroupSnapshot] = []
     @Published private(set) var processMonitorStatus = ProcessMonitorStatus()
-    @Published private(set) var processHistoryStatus = "正在准备进程历史"
+    @Published private(set) var processHistoryStatus = String(localized: "正在准备进程历史")
     @Published private(set) var processHistoryCache: [String: [ProcessHistoryPoint]] = [:]
 
     private let fallback = SystemFallbackReader()
@@ -143,11 +143,11 @@ final class DashboardModel: ObservableObject {
             history = try store.loadRecent()
             try store.prune()
             historyStoreStatus = store.migratedRecordCount > 0
-                ? "已安全迁移 \(store.migratedRecordCount) 条旧历史数据"
-                : "历史数据正常"
+                ? String(format: String(localized: "已安全迁移 %@ 条旧历史数据"), String(describing: store.migratedRecordCount))
+                : String(localized: "历史数据正常")
             historyBackupStatus = Self.describe(store.backupState)
         } catch {
-            historyStoreStatus = "历史数据不可用：\(error.localizedDescription)"
+            historyStoreStatus = String(format: String(localized: "历史数据不可用：%@"), String(describing: error.localizedDescription))
         }
         historyStore = openedStore
 
@@ -156,9 +156,9 @@ final class DashboardModel: ObservableObject {
             let store = try ProcessHistoryStore()
             try store.prune()
             openedProcessStore = store
-            processHistoryStatus = "重点进程历史正常"
+            processHistoryStatus = String(localized: "重点进程历史正常")
         } catch {
-            processHistoryStatus = "进程历史不可用：\(error.localizedDescription)"
+            processHistoryStatus = String(format: String(localized: "进程历史不可用：%@"), String(describing: error.localizedDescription))
         }
         processHistoryStore = openedProcessStore
 
@@ -490,7 +490,7 @@ final class DashboardModel: ObservableObject {
     private func performNetworkTest(tier: NetworkTestTier, trigger: NetworkTestTrigger, keyHash: String?) async {
         let link = current.deep.networkLink
         let path = networkPath
-        networkPhase = "准备中"
+        networkPhase = String(localized: "准备中")
 
         // 进度回调单独提出来，避免在已经捕获了 weak self 的闭包里再嵌一层捕获。
         let reportPhase: @Sendable (NetworkProbe.Progress) -> Void = { [weak self] progress in
@@ -551,7 +551,7 @@ final class DashboardModel: ObservableObject {
         case .socPower:
             return current.deep.systemPowerWatts.map { String(format: "%.1f W", $0) }
         case .memoryPercent:
-            return memory?.usedFraction.map { String(format: "内存 %.0f%%", $0 * 100) }
+            return memory?.usedFraction.map { String(format: String(localized: "内存 %.0f%%"), $0 * 100) }
         }
     }
 
@@ -798,9 +798,9 @@ final class DashboardModel: ObservableObject {
             processHistoryCache[stableIdentifier] = try processHistoryStore.loadRecent(
                 stableIdentifier: stableIdentifier
             )
-            processHistoryStatus = "重点进程历史正常"
+            processHistoryStatus = String(localized: "重点进程历史正常")
         } catch {
-            processHistoryStatus = "进程历史读取失败：\(error.localizedDescription)"
+            processHistoryStatus = String(format: String(localized: "进程历史读取失败：%@"), String(describing: error.localizedDescription))
         }
     }
 
@@ -863,11 +863,11 @@ final class DashboardModel: ObservableObject {
     }
 
     var wholeMachineWattsText: String {
-        guard let watts = wholeMachineWatts else { return "不可用" }
+        guard let watts = wholeMachineWatts else { return String(localized: "不可用") }
         // 整机比它自己的子集(SoC 封装)还小,必是不同源瞬时打架:
         // 宁可不报,不报一个物理上不可能的数。
         if let package = current.deep.socPower?.packageWatts, watts < package {
-            return "不可用"
+            return String(localized: "不可用")
         }
         return MetricFormat.watts(watts)
     }
@@ -919,22 +919,22 @@ final class DashboardModel: ObservableObject {
 
         // 电池健康
         if let health = battery.healthPercent {
-            let cycles = battery.cycleCount.map { ",循环 \($0) 次" } ?? ""
+            let cycles = battery.cycleCount.map { String(format: String(localized: ",循环 %@ 次"), String(describing: $0)) } ?? ""
             items.append(.init(
                 level: health < 80 ? .warning : .ok,
-                category: "电池健康",
+                category: String(localized: "电池健康"),
                 summary: "\(Int(health.rounded()))%\(cycles)",
-                detail: health < 80 ? "低于 80% 通常意味着该考虑更换电池了。" : nil
+                detail: health < 80 ? String(localized: "低于 80% 通常意味着该考虑更换电池了。") : nil
             ))
         } else {
-            missing.append("电池健康度")
+            missing.append(String(localized: "电池健康度"))
         }
 
         // 充电链路
         if let verdict = chargeLinkDiagnosis {
             items.append(.init(
                 level: verdict.isWarning ? .warning : .ok,
-                category: "充电链路",
+                category: String(localized: "充电链路"),
                 summary: verdict.summary,
                 detail: verdict.isWarning ? verdict.detail : nil
             ))
@@ -944,12 +944,12 @@ final class DashboardModel: ObservableObject {
         if let verdict = memoryDiagnosis {
             items.append(.init(
                 level: verdict.isWarning ? .warning : (verdict.kind == .comfortable ? .ok : .notice),
-                category: "内存",
+                category: String(localized: "内存"),
                 summary: verdict.summary,
                 detail: verdict.kind == .comfortable ? nil : verdict.detail
             ))
         } else {
-            missing.append("内存分项")
+            missing.append(String(localized: "内存分项"))
         }
 
         // 热与降频
@@ -957,14 +957,14 @@ final class DashboardModel: ObservableObject {
             let recent = throttleEvents.count
             items.append(.init(
                 level: recent > 0 ? .notice : .ok,
-                category: "温度",
+                category: String(localized: "温度"),
                 summary: recent > 0
-                    ? String(format: "当前 %.0f°C,本次运行期间热降频 %d 次", hotspot, recent)
-                    : String(format: "当前 %.0f°C,未见热降频", hotspot),
-                detail: recent > 2 ? "频繁降频会持续拖慢性能,改善散热或减少同时运行的重负载可缓解。" : nil
+                    ? String(format: String(localized: "当前 %.0f°C,本次运行期间热降频 %d 次"), hotspot, recent)
+                    : String(format: String(localized: "当前 %.0f°C,未见热降频"), hotspot),
+                detail: recent > 2 ? String(localized: "频繁降频会持续拖慢性能,改善散热或减少同时运行的重负载可缓解。") : nil
             ))
         } else {
-            missing.append("芯片温度")
+            missing.append(String(localized: "芯片温度"))
         }
 
         // 睡眠掉电
@@ -972,47 +972,47 @@ final class DashboardModel: ObservableObject {
             let verdict = SleepDiagnosis.diagnose(session)
             items.append(.init(
                 level: verdict.isWarning ? .warning : .ok,
-                category: "睡眠掉电",
+                category: String(localized: "睡眠掉电"),
                 summary: verdict.summary,
                 detail: verdict.isWarning ? verdict.detail : nil
             ))
         } else {
-            missing.append("睡眠掉电(近期没有电池睡眠记录)")
+            missing.append(String(localized: "睡眠掉电(近期没有电池睡眠记录)"))
         }
 
         // 存储。没逛过磁盘页时数据是空的——必须说出来,
         // 否则读者会把「报告里没提存储」当成「存储没问题」。
-        if diskOverview == nil { missing.append("存储(打开性能→磁盘页后重新生成)") }
+        if diskOverview == nil { missing.append(String(localized: "存储(打开性能→磁盘页后重新生成)")) }
         if let root = diskOverview?.volumes.first(where: \.isRoot) {
             let freeRatio = Double(root.availableBytes) / Double(max(1, root.totalBytes))
             items.append(.init(
                 level: freeRatio < 0.1 ? .warning : .ok,
-                category: "存储",
-                summary: "启动卷剩余 \(MetricFormat.storageBytes(UInt64(root.availableBytes))) / 共 \(MetricFormat.storageBytes(UInt64(root.totalBytes)))",
-                detail: freeRatio < 0.1 ? "可用空间低于一成,系统与 App 都会受影响。" : nil
+                category: String(localized: "存储"),
+                summary: String(format: String(localized: "启动卷剩余 %@ / 共 %@"), String(describing: MetricFormat.storageBytes(UInt64(root.availableBytes))), String(describing: MetricFormat.storageBytes(UInt64(root.totalBytes)))),
+                detail: freeRatio < 0.1 ? String(localized: "可用空间低于一成,系统与 App 都会受影响。") : nil
             ))
         }
 
         // 自启项。同上:没逛过启动项页就没有数据。
-        if backgroundItems.isEmpty { missing.append("开机自启(打开性能→启动项页后重新生成)") }
+        if backgroundItems.isEmpty { missing.append(String(localized: "开机自启(打开性能→启动项页后重新生成)")) }
         if !backgroundItems.isEmpty {
             let running = backgroundItems.filter(\.isRunning).count
             items.append(.init(
                 level: running > 8 ? .notice : .ok,
-                category: "开机自启",
-                summary: "\(backgroundItems.count) 项第三方自启,\(running) 项正在运行",
-                detail: running > 8 ? "自启项越多,开机越慢、后台常驻耗电越多。" : nil
+                category: String(localized: "开机自启"),
+                summary: String(format: String(localized: "%@ 项第三方自启,%@ 项正在运行"), String(describing: backgroundItems.count), String(describing: running)),
+                detail: running > 8 ? String(localized: "自启项越多,开机越慢、后台常驻耗电越多。") : nil
             ))
         }
 
         // 显示器。外接屏跑不满才是问题,内置屏自适应刷新不算。
-        if displays.isEmpty { missing.append("显示器(打开性能→芯片页后重新生成)") }
+        if displays.isEmpty { missing.append(String(localized: "显示器(打开性能→芯片页后重新生成)")) }
         if let limited = displays.first(where: \.isBelowMaxRefresh), let max = limited.maxRefreshHz {
             items.append(.init(
                 level: .notice,
-                category: "显示器",
-                summary: "「\(limited.name)」跑在 \(Int(limited.refreshHz ?? 0))Hz,低于它支持的 \(Int(max))Hz",
-                detail: "外接屏跑不满通常是线材或转接头带宽不够。"
+                category: String(localized: "显示器"),
+                summary: String(format: String(localized: "「%@」跑在 %@Hz,低于它支持的 %@Hz"), String(describing: limited.name), String(describing: Int(limited.refreshHz ?? 0)), String(describing: Int(max))),
+                detail: String(localized: "外接屏跑不满通常是线材或转接头带宽不够。")
             ))
         }
 
@@ -1066,13 +1066,13 @@ final class DashboardModel: ObservableObject {
         switch state {
         case let .created(url, bytes):
             let size = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
-            return "已保留升级前备份（\(size)）：\(url.lastPathComponent)"
+            return String(format: String(localized: "已保留升级前备份（%@）：%@"), String(describing: size), String(describing: url.lastPathComponent))
         case let .alreadyExists(url):
-            return "已保留升级前备份：\(url.lastPathComponent)"
+            return String(format: String(localized: "已保留升级前备份：%@"), String(describing: url.lastPathComponent))
         case .notNeeded:
             return nil
         case let .failed(reason):
-            return "升级前备份失败：\(reason)"
+            return String(format: String(localized: "升级前备份失败：%@"), String(describing: reason))
         }
     }
 
@@ -1245,11 +1245,11 @@ final class DashboardModel: ObservableObject {
             let cutoff = Date().addingTimeInterval(-7 * 86_400)
             history.removeAll { $0.timestamp < cutoff }
             try historyStore.prune()
-            if !historyStoreStatus.hasPrefix("已安全迁移") {
-                historyStoreStatus = "历史数据正常"
+            if !historyStoreStatus.hasPrefix(String(localized: "已安全迁移")) {
+                historyStoreStatus = String(localized: "历史数据正常")
             }
         } catch {
-            historyStoreStatus = "历史数据写入失败：\(error.localizedDescription)"
+            historyStoreStatus = String(format: String(localized: "历史数据写入失败：%@"), String(describing: error.localizedDescription))
         }
     }
 
@@ -1265,9 +1265,9 @@ final class DashboardModel: ObservableObject {
                     $0.timestamp < cutoff
                 }
             }
-            processHistoryStatus = "重点进程历史正常"
+            processHistoryStatus = String(localized: "重点进程历史正常")
         } catch {
-            processHistoryStatus = "进程历史写入失败：\(error.localizedDescription)"
+            processHistoryStatus = String(format: String(localized: "进程历史写入失败：%@"), String(describing: error.localizedDescription))
         }
     }
 }

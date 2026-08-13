@@ -40,6 +40,12 @@ install -m 755 "$BIN_PATH/MacPulseCollector" "$APP_PATH/Contents/Helpers/MacPuls
 install -m 644 "$PROJECT_ROOT/Resources/Info.plist" "$APP_PATH/Contents/Info.plist"
 install -m 644 "$PROJECT_ROOT/THIRD_PARTY_NOTICES.md" "$APP_PATH/Contents/Resources/THIRD_PARTY_NOTICES.md"
 
+# 本地化:中文是源语言(代码里的 key 本身),英文翻译表随包分发。
+# 放在 Bundle.main 的 Resources 下,SwiftUI 字面量与 String(localized:) 都能查到。
+mkdir -p "$APP_PATH/Contents/Resources/en.lproj" "$APP_PATH/Contents/Resources/zh-Hans.lproj"
+install -m 644 "$PROJECT_ROOT/Resources/en.lproj/Localizable.strings" \
+  "$APP_PATH/Contents/Resources/en.lproj/Localizable.strings"
+
 swiftc "$PROJECT_ROOT/Tools/IconGenerator.swift" \
   -module-cache-path "$CLANG_MODULE_CACHE_PATH" \
   -o "$PROJECT_ROOT/.build-app/icon-generator"

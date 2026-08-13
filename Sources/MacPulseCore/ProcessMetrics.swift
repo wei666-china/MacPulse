@@ -7,9 +7,9 @@ public enum ProcessCategory: String, Codable, Sendable, CaseIterable {
 
     public var title: String {
         switch self {
-        case .application: "应用"
-        case .background: "后台"
-        case .system: "系统"
+        case .application: String(localized: "应用")
+        case .background: String(localized: "后台")
+        case .system: String(localized: "系统")
         }
     }
 }
@@ -26,10 +26,10 @@ public enum ProcessMetricKind: String, Codable, Sendable, CaseIterable, Identifi
     public var title: String {
         switch self {
         case .cpu: "CPU"
-        case .memory: "内存"
+        case .memory: String(localized: "内存")
         case .gpu: "GPU"
-        case .disk: "磁盘"
-        case .energy: "能耗"
+        case .disk: String(localized: "磁盘")
+        case .energy: String(localized: "能耗")
         }
     }
 
@@ -39,9 +39,9 @@ public enum ProcessMetricKind: String, Codable, Sendable, CaseIterable, Identifi
         case .gpu:
             // 这是 Metal 命令缓冲时间，各进程之和不等于系统 GPU 活跃度：
             // 合成器和驱动自身的开销落在别处。所以只报 ms/s，不报百分比。
-            "GPU 时间是各 App 提交的 Metal 命令耗时，加起来不等于系统 GPU 占用率。"
+            String(localized: "GPU 时间是各 App 提交的 Metal 命令耗时，加起来不等于系统 GPU 占用率。")
         case .memory:
-            "各 App 物理内存之和大于「已使用」，因为共享内存会被重复计入。"
+            String(localized: "各 App 物理内存之和大于「已使用」，因为共享内存会被重复计入。")
         default:
             nil
         }
@@ -56,10 +56,10 @@ public enum EnergyImpactLevel: String, Codable, Sendable, Comparable {
 
     public var title: String {
         switch self {
-        case .unavailable: "不可用"
-        case .low: "低"
-        case .medium: "中"
-        case .high: "高"
+        case .unavailable: String(localized: "不可用")
+        case .low: String(localized: "低")
+        case .medium: String(localized: "中")
+        case .high: String(localized: "高")
         }
     }
 

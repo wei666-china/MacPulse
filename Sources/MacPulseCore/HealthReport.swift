@@ -65,14 +65,14 @@ public struct HealthReport: Sendable {
     public func markdown() -> String {
         let stamp = generatedAt.formatted(.dateTime.year().month().day().hour().minute())
         var lines: [String] = []
-        lines.append("## MacPulse 体检报告")
+        lines.append(String(localized: "## MacPulse 体检报告"))
         lines.append("")
-        lines.append("- 机型:\(machine)")
-        lines.append("- 系统:\(systemVersion)")
+        lines.append(String(format: String(localized: "- 机型:%@"), String(describing: machine)))
+        lines.append(String(format: String(localized: "- 系统:%@"), String(describing: systemVersion)))
         lines.append("- MacPulse:\(appVersion)")
-        lines.append("- 生成时间:\(stamp)")
+        lines.append(String(format: String(localized: "- 生成时间:%@"), String(describing: stamp)))
         lines.append("")
-        lines.append(warningCount > 0 ? "**发现 \(warningCount) 项需要注意。**" : "**未发现异常。**")
+        lines.append(warningCount > 0 ? String(format: String(localized: "**发现 %@ 项需要注意。**"), String(describing: warningCount)) : String(localized: "**未发现异常。**"))
         lines.append("")
 
         for item in sortedItems {
@@ -89,10 +89,13 @@ public struct HealthReport: Sendable {
 
         if !unavailable.isEmpty {
             lines.append("")
-            lines.append("_本机读不到:\(unavailable.joined(separator: "、"))——这些项目未参与体检,不代表没有问题。_")
+            lines.append(String(
+                format: String(localized: "_本机读不到:%@——这些项目未参与体检,不代表没有问题。_"),
+                unavailable.joined(separator: String(localized: "、"))
+            ))
         }
         lines.append("")
-        lines.append("_报告不含序列号、网络名称、IP、用户名或文件路径。_")
+        lines.append(String(localized: "_报告不含序列号、网络名称、IP、用户名或文件路径。_"))
         return lines.joined(separator: "\n")
     }
 }

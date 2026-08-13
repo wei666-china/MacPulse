@@ -10,10 +10,10 @@ enum LoginItemStatus {
 
     var title: String {
         switch self {
-        case .enabled: "已启用"
-        case .disabled: "未启用"
-        case .requiresApproval: "等待在系统设置中允许"
-        case .unavailable: "当前不可用"
+        case .enabled: String(localized: "已启用")
+        case .disabled: String(localized: "未启用")
+        case .requiresApproval: String(localized: "等待在系统设置中允许")
+        case .unavailable: String(localized: "当前不可用")
         }
     }
 }

@@ -52,7 +52,7 @@ actor ProcessSampler {
                     limitedProcessCount: collection.limitedCount,
                     samplingDuration: Date().timeIntervalSince(startedAt),
                     lastUpdated: now,
-                    errorMessage: "无法读取当前进程列表"
+                    errorMessage: String(localized: "无法读取当前进程列表")
                 )
             )
         }

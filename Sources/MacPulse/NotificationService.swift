@@ -74,14 +74,14 @@ final class NotificationService {
 
         switch alert {
         case "temperature":
-            content.title = "电池温度偏高"
-            content.body = "电池温度已持续高于设定阈值，建议暂停高负载任务并改善散热。"
+            content.title = String(localized: "电池温度偏高")
+            content.body = String(localized: "电池温度已持续高于设定阈值，建议暂停高负载任务并改善散热。")
         case "thermal":
-            content.title = "Mac 正在承受较高热压力"
-            content.body = "系统热状态为\(snapshot.deep.thermalLevel.title)，性能可能受到限制。"
+            content.title = String(localized: "Mac 正在承受较高热压力")
+            content.body = String(format: String(localized: "系统热状态为%@，性能可能受到限制。"), String(describing: snapshot.deep.thermalLevel.title))
         case "health":
-            content.title = "电池健康度需要关注"
-            content.body = "当前估算健康度低于 80%，可在系统设置中进一步检查电池状态。"
+            content.title = String(localized: "电池健康度需要关注")
+            content.body = String(localized: "当前估算健康度低于 80%，可在系统设置中进一步检查电池状态。")
         default:
             return
         }

@@ -12,12 +12,12 @@ enum AppSection: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .overview: "总览"
-        case .battery: "电池"
-        case .performance: "性能"
-        case .network: "网络"
-        case .history: "趋势"
-        case .settings: "设置"
+        case .overview: String(localized: "总览")
+        case .battery: String(localized: "电池")
+        case .performance: String(localized: "性能")
+        case .network: String(localized: "网络")
+        case .history: String(localized: "趋势")
+        case .settings: String(localized: "设置")
         }
     }
 
@@ -185,17 +185,17 @@ struct RootView: View {
     ) {
         switch model.collectorStatus.phase {
         case .live:
-            ("实时", MacPulseTheme.normal, "深度传感器已连接")
+            (String(localized: "实时"), MacPulseTheme.normal, String(localized: "深度传感器已连接"))
         case .degraded:
-            ("部分数据", MacPulseTheme.warm, "部分深度传感器不可用")
+            (String(localized: "部分数据"), MacPulseTheme.warm, String(localized: "部分深度传感器不可用"))
         case .starting:
-            ("连接中", MacPulseTheme.plugged, "正在连接深度传感器")
+            (String(localized: "连接中"), MacPulseTheme.plugged, String(localized: "正在连接深度传感器"))
         case .reconnecting:
-            ("重连中", MacPulseTheme.warm, "深度传感器正在重新连接")
+            (String(localized: "重连中"), MacPulseTheme.warm, String(localized: "深度传感器正在重新连接"))
         case .unavailable:
-            ("基础模式", MacPulseTheme.warm, "深度传感器不可用")
+            (String(localized: "基础模式"), MacPulseTheme.warm, String(localized: "深度传感器不可用"))
         case .sleeping:
-            ("已暂停", .secondary, "系统睡眠时已暂停采集")
+            (String(localized: "已暂停"), .secondary, String(localized: "系统睡眠时已暂停采集"))
         }
     }
 }

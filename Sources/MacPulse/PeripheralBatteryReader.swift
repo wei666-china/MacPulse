@@ -103,11 +103,11 @@ actor PeripheralBatteryReader {
     /// 但通知类型带 "TP" 前缀)。推不出就叫「蓝牙外设」,不硬编设备名。
     private static func fallbackName(read: (String) -> Any?) -> String {
         if let notify = read("BatteryFaultNotificationType") as? String {
-            if notify.hasPrefix("TP") { return "妙控板" }
-            if notify.hasPrefix("KB") { return "妙控键盘" }
-            if notify.hasPrefix("M") { return "妙控鼠标" }
+            if notify.hasPrefix("TP") { return String(localized: "妙控板") }
+            if notify.hasPrefix("KB") { return String(localized: "妙控键盘") }
+            if notify.hasPrefix("M") { return String(localized: "妙控鼠标") }
         }
-        return "蓝牙外设"
+        return String(localized: "蓝牙外设")
     }
 
     // MARK: - system_profiler 慢路

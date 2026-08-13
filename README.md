@@ -1,6 +1,6 @@
 # MacPulse
 
-**Honest, native performance monitoring for Apple Silicon Macs.** A menu-bar glass panel that shows power, thermals, battery, processes, disk and network — and never fakes a number: anything unreadable says so, instead of rendering a fabricated zero.
+**Honest, native performance monitoring for Apple Silicon Macs.** A menu-bar glass panel that shows power, thermals, battery, processes, disk and network — and never fakes a number: anything unreadable says so, instead of rendering a fabricated zero. UI in English and Simplified Chinese, following the system language.
 
 MacPulse 是一款针对 Apple Silicon Mac 的原生菜单栏监控 App。充放电功率、电池健康、芯片温度、CPU/GPU 功耗轨、进程排行、磁盘与网络吞吐,集中在一块透出桌面的玻璃面板里。它的立身之本是**诚实**:读不到的显示「不可用」,绝不编数据;每个关键读数都有独立真值对账测试盯着。
 
@@ -26,6 +26,7 @@ MacPulse 是一款针对 Apple Silicon Mac 的原生菜单栏监控 App。充放
 - 网络实测(明确同意制)与本机链路读数,趋势 90 天
 - 最近 7 天历史趋势(分钟聚合,睡眠与缺失不会伪造成零)
 - 高温/热压力/健康度本地提醒:独立开关、冷却时间、明确授权
+- 界面中英双语,跟随系统语言(英文系统自动显示英文)
 - 无充电控制、无风扇控制;唯一的网络请求是用户明确开启的测速
 
 ## 安装与本地构建

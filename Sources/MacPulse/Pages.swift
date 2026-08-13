@@ -26,7 +26,7 @@ struct OverviewView: View {
                 consumersCard
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                     MetricCard(
-                        title: "芯片热点",
+                        title: String(localized: "芯片热点"),
                         value: MetricFormat.temperature(snapshot.deep.hotspotTemperature),
                         detail: snapshot.deep.thermalLevel.title,
                         symbol: "thermometer.medium",
@@ -34,11 +34,11 @@ struct OverviewView: View {
                         progress: snapshot.deep.hotspotTemperature.map { $0 / 100 }
                     )
                     MetricCard(
-                        title: "SoC 总功耗",
+                        title: String(localized: "SoC 总功耗"),
                         value: MetricFormat.watts(snapshot.deep.systemPowerWatts),
                         // 有读数就别说「等待」:采集器状态标志在重启后有几秒滞后,
                         // 以数据本身为准。
-                        detail: snapshot.deep.systemPowerWatts != nil ? "SMC 实时读数" : "等待采集器",
+                        detail: snapshot.deep.systemPowerWatts != nil ? String(localized: "SMC 实时读数") : String(localized: "等待采集器"),
                         symbol: "bolt.horizontal.fill",
                         tint: MacPulseTheme.plugged
                     )
@@ -50,7 +50,7 @@ struct OverviewView: View {
         }
         .overlay {
             if model.isLoading {
-                ProgressView("正在读取传感器…")
+                ProgressView(String(localized: "正在读取传感器…"))
                     .padding(20)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
             }
@@ -62,13 +62,13 @@ struct OverviewView: View {
         // 数字统一四舍五入:截断会造出「警示条 79% / 英雄卡 80%」同屏打架。
         // 热点阈值 90°C 与卡片量表的变红线对齐,不留「量表红了却没警示」的空档。
         if let hotspot = snapshot.deep.hotspotTemperature, hotspot >= 90 {
-            return ("芯片热点 \(Int(hotspot.rounded()))°C,已接近降频线", "thermometer.high")
+            return (String(format: String(localized: "芯片热点 %@°C,已接近降频线"), String(describing: Int(hotspot.rounded()))), "thermometer.high")
         }
         if snapshot.deep.thermalLevel == .serious || snapshot.deep.thermalLevel == .critical {
-            return ("系统热压力:\(snapshot.deep.thermalLevel.title)", "exclamationmark.thermometer")
+            return (String(format: String(localized: "系统热压力:%@"), String(describing: snapshot.deep.thermalLevel.title)), "exclamationmark.thermometer")
         }
         if let health = snapshot.battery.healthPercent, health.rounded() < 80 {
-            return ("电池健康度 \(Int(health.rounded()))%,建议预约检修", "battery.25percent")
+            return (String(format: String(localized: "电池健康度 %@%%,建议预约检修"), String(describing: Int(health.rounded()))), "battery.25percent")
         }
         return nil
     }
@@ -96,7 +96,7 @@ struct OverviewView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(diagnosis.summary)
                         .font(.callout.weight(.semibold))
-                    Text("详情在「电池」页的充电链路卡")
+                    Text(String(localized: "详情在「电池」页的充电链路卡"))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -110,10 +110,10 @@ struct OverviewView: View {
     private var consumersCard: some View {
         LiquidCard {
             VStack(spacing: 10) {
-                SectionHeader(title: "谁在耗电")
+                SectionHeader(title: String(localized: "谁在耗电"))
                 let top = topConsumers
                 if top.isEmpty {
-                    Text("进程采样准备中…")
+                    Text(String(localized: "进程采样准备中…"))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -129,7 +129,7 @@ struct OverviewView: View {
                     // 前三名远小于总负载时,差额不是 bug 是长尾:
                     // 点破它,免得「总 19% 但列表只有 2%」看着像坏了。
                     if let residual = consumerResidualPercent {
-                        Text("其余约 \(residual)% 由大量小进程与系统服务分摊")
+                        Text(String(format: String(localized: "其余约 %@%% 由大量小进程与系统服务分摊"), String(describing: residual)))
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -137,11 +137,11 @@ struct OverviewView: View {
                 }
                 Divider()
                 HStack {
-                    consumerFooter("CPU 总负载", MetricFormat.percent(snapshot.deep.cpuUsagePercent))
+                    consumerFooter(String(localized: "CPU 总负载"), MetricFormat.percent(snapshot.deep.cpuUsagePercent))
                     Divider().frame(height: 24)
-                    consumerFooter("内存已用", memoryPercentText)
+                    consumerFooter(String(localized: "内存已用"), memoryPercentText)
                     Divider().frame(height: 24)
-                    consumerFooter("整机功耗", model.wholeMachineWattsText)
+                    consumerFooter(String(localized: "整机功耗"), model.wholeMachineWattsText)
                 }
             }
         }
@@ -167,7 +167,7 @@ struct OverviewView: View {
     }
 
     private func normalizedCPUText(_ group: ProcessGroupSnapshot) -> String {
-        guard let value = normalizedGroupPercent(group) else { return "不可用" }
+        guard let value = normalizedGroupPercent(group) else { return String(localized: "不可用") }
         // 10% 以下保留一位小数,不然满屏「0%」像全都没在干活。
         return value < 10 ? String(format: "%.1f%%", value) : String(format: "%.0f%%", value)
     }
@@ -214,7 +214,7 @@ struct OverviewView: View {
                             .font(.system(size: 27, weight: .semibold))
                             .monospacedDigit()
                             .contentTransition(.numericText())
-                            .accessibilityLabel("电池净功率 \(MetricFormat.watts(snapshot.battery.netPowerWatts, signed: true))")
+                            .accessibilityLabel(String(format: String(localized: "电池净功率 %@"), String(describing: MetricFormat.watts(snapshot.battery.netPowerWatts, signed: true))))
 
                         VStack(alignment: .leading, spacing: 1) {
                             Text(heroRuntimeText)
@@ -233,19 +233,19 @@ struct OverviewView: View {
 
                 HStack {
                     heroFooter(
-                        "适配器",
+                        String(localized: "适配器"),
                         MetricFormat.watts(snapshot.battery.adapterRatedWatts),
                         "powerplug"
                     )
                     Divider().frame(height: 28)
                     heroFooter(
-                        "电池温度",
+                        String(localized: "电池温度"),
                         MetricFormat.temperature(snapshot.battery.temperatureCelsius),
                         "thermometer.low"
                     )
                     Divider().frame(height: 28)
                     heroFooter(
-                        "健康度",
+                        String(localized: "健康度"),
                         MetricFormat.percent(snapshot.battery.healthPercent),
                         "heart.text.square"
                     )
@@ -271,10 +271,10 @@ struct OverviewView: View {
     private var liveChart: some View {
         LiquidCard(padding: 13) {
             VStack(spacing: 8) {
-                SectionHeader(title: "实时能量", subtitle: "最近几分钟")
+                SectionHeader(title: String(localized: "实时能量"), subtitle: String(localized: "最近几分钟"))
                 if model.liveHistory.count < 3 {
                     // 刚启动只有一两个点,画出来是条秃线。如实说明,几秒即好。
-                    Text("正在积累数据,几个采样点后出图…")
+                    Text(String(localized: "正在积累数据,几个采样点后出图…"))
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                         .frame(height: 48)
@@ -284,8 +284,8 @@ struct OverviewView: View {
                     // 文案按供电来源分:全 nil 的窗口在电池上也会落到这里,
                     // 不能断言「电源直供」。
                     Text(snapshot.battery.powerSource == .external
-                        ? "电源直供,电池几乎零净流量"
-                        : "电池净流量数据不足")
+                        ? String(localized: "电源直供,电池几乎零净流量")
+                        : String(localized: "电池净流量数据不足"))
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                         .frame(height: 48)
@@ -303,16 +303,16 @@ struct OverviewView: View {
                             // 带符号绘制:零线以上是充入、以下是放出。
                             // 旧版取绝对值,充电和放电画出来一模一样,方向全丢。
                             LineMark(
-                                x: .value("时间", point.timestamp),
-                                y: .value("功率", power)
+                                x: .value(String(localized: "时间"), point.timestamp),
+                                y: .value(String(localized: "功率"), power)
                             )
                             .interpolationMethod(.catmullRom)
                             .foregroundStyle(power >= 0 ? MacPulseTheme.normal : MacPulseTheme.ink)
                             .lineStyle(.init(lineWidth: 2.2, lineCap: .round))
 
                             AreaMark(
-                                x: .value("时间", point.timestamp),
-                                y: .value("功率", power)
+                                x: .value(String(localized: "时间"), point.timestamp),
+                                y: .value(String(localized: "功率"), power)
                             )
                             .interpolationMethod(.catmullRom)
                             .foregroundStyle(
@@ -327,7 +327,7 @@ struct OverviewView: View {
                             )
                         }
                     }
-                    RuleMark(y: .value("零", 0))
+                    RuleMark(y: .value(String(localized: "零"), 0))
                         .foregroundStyle(.secondary.opacity(0.3))
                         .lineStyle(.init(lineWidth: 0.5, dash: [3, 3]))
                 }
@@ -336,7 +336,7 @@ struct OverviewView: View {
                 // 纵轴锁个下限:微瓦级噪声不放大成惊涛骇浪。
                 .chartYScale(domain: -max(recentPeakPowerWatts * 1.25, 1)...max(recentPeakPowerWatts * 1.25, 1))
                 .frame(height: 48)
-                .accessibilityLabel("实时电池功率曲线")
+                .accessibilityLabel(String(localized: "实时电池功率曲线"))
     }
 
     private var recentPeakPowerWatts: Double {
@@ -354,11 +354,11 @@ struct OverviewView: View {
         if battery.state == .pluggedNotCharging,
            (75...85).contains(battery.percentage),
            abs(battery.netPowerWatts ?? 0) < 0.6 {
-            return "已优化充电，暂停在 \(Int(battery.percentage))%"
+            return String(format: String(localized: "已优化充电，暂停在 %@%%"), String(describing: Int(battery.percentage)))
         }
-        if battery.state == .full { return "电池已充满" }
+        if battery.state == .full { return String(localized: "电池已充满") }
         let value = MetricFormat.runtime(model.runtimeEstimate)
-        return battery.state == .charging ? "预计 \(value) 充满" : "预计可用 \(value)"
+        return battery.state == .charging ? String(format: String(localized: "预计 %@ 充满"), String(describing: value)) : String(format: String(localized: "预计可用 %@"), String(describing: value))
     }
 
     private var temperatureColor: Color {
@@ -373,7 +373,7 @@ struct OverviewView: View {
     }
 
     private var memoryPercentText: String {
-        guard let memoryProgress else { return "不可用" }
+        guard let memoryProgress else { return String(localized: "不可用") }
         return String(format: "%.0f%%", memoryProgress * 100)
     }
 }
@@ -393,12 +393,12 @@ struct BatteryView: View {
                             isCharging: battery.state == .charging
                         )
                         VStack(alignment: .leading, spacing: 7) {
-                            Text("电池状态")
+                            Text(String(localized: "电池状态"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text(battery.state.title)
                                 .font(.title3.weight(.bold))
-                            Text(battery.cycleCount.map { "循环 \($0) 次" } ?? "循环次数不可用")
+                            Text(battery.cycleCount.map { String(format: String(localized: "循环 %@ 次"), String(describing: $0)) } ?? String(localized: "循环次数不可用"))
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                         }
@@ -408,25 +408,25 @@ struct BatteryView: View {
 
                 LiquidCard {
                     VStack(spacing: 12) {
-                        SectionHeader(title: "充电与供电")
-                        ValueRow(title: "当前供电来源", value: powerSourceTitle, symbol: "cable.connector", tint: .blue)
-                        ValueRow(title: "电池净功率", value: MetricFormat.watts(battery.netPowerWatts, signed: true), symbol: "bolt.fill", tint: .green)
+                        SectionHeader(title: String(localized: "充电与供电"))
+                        ValueRow(title: String(localized: "当前供电来源"), value: powerSourceTitle, symbol: "cable.connector", tint: .blue)
+                        ValueRow(title: String(localized: "电池净功率"), value: MetricFormat.watts(battery.netPowerWatts, signed: true), symbol: "bolt.fill", tint: .green)
                         // 只叫「额定」:这个键读的是铭牌值,从来不是协商结果——
                         // 协商在下面充电链路卡里,标混了等于三个瓦数三种口径。
                         // 读不到时用充电链路的充电器上限兜底,不轻易「不可用」。
                         ValueRow(
-                            title: "适配器额定功率",
+                            title: String(localized: "适配器额定功率"),
                             value: battery.adapterRatedWatts.map { "\(Int($0.rounded()))W" }
-                                ?? model.chargeLink?.chargerMaxWatts.map { "\($0)W(PD 广告)" }
-                                ?? "不可用",
+                                ?? model.chargeLink?.chargerMaxWatts.map { String(format: String(localized: "%@W(PD 广告)"), String(describing: $0)) }
+                                ?? String(localized: "不可用"),
                             symbol: "powerplug.fill",
                             tint: .blue
                         )
-                        ValueRow(title: "SoC 总功耗", value: MetricFormat.watts(model.current.deep.systemPowerWatts), symbol: "cpu", tint: .purple)
-                        ValueRow(title: "整机功耗", value: model.wholeMachineWattsText, symbol: "desktopcomputer", tint: .indigo)
-                        ValueRow(title: "实时电压", value: battery.voltageVolts.map { String(format: "%.2f V", $0) } ?? "不可用", symbol: "waveform.path")
-                        ValueRow(title: "实时电流", value: battery.currentAmps.map { String(format: "%+.2f A", $0) } ?? "不可用", symbol: "arrow.left.arrow.right")
-                        ValueRow(title: "预计时间", value: MetricFormat.runtime(model.runtimeEstimate), symbol: "clock")
+                        ValueRow(title: String(localized: "SoC 总功耗"), value: MetricFormat.watts(model.current.deep.systemPowerWatts), symbol: "cpu", tint: .purple)
+                        ValueRow(title: String(localized: "整机功耗"), value: model.wholeMachineWattsText, symbol: "desktopcomputer", tint: .indigo)
+                        ValueRow(title: String(localized: "实时电压"), value: battery.voltageVolts.map { String(format: "%.2f V", $0) } ?? String(localized: "不可用"), symbol: "waveform.path")
+                        ValueRow(title: String(localized: "实时电流"), value: battery.currentAmps.map { String(format: "%+.2f A", $0) } ?? String(localized: "不可用"), symbol: "arrow.left.arrow.right")
+                        ValueRow(title: String(localized: "预计时间"), value: MetricFormat.runtime(model.runtimeEstimate), symbol: "clock")
                     }
                 }
 
@@ -449,15 +449,15 @@ struct BatteryView: View {
 
                 LiquidCard {
                     VStack(spacing: 12) {
-                        SectionHeader(title: "健康与容量")
-                        ValueRow(title: "估算健康度", value: MetricFormat.percent(battery.healthPercent), symbol: "heart.fill", tint: .pink)
-                        ValueRow(title: "电池温度", value: MetricFormat.temperature(battery.temperatureCelsius), symbol: "thermometer.medium", tint: .orange)
-                        ValueRow(title: "当前容量", value: capacity(battery.currentCapacityMAh), symbol: "battery.50percent")
-                        ValueRow(title: "最大容量", value: capacity(battery.maxCapacityMAh), symbol: "battery.100percent")
-                        ValueRow(title: "设计容量", value: capacity(battery.designCapacityMAh), symbol: "ruler")
+                        SectionHeader(title: String(localized: "健康与容量"))
+                        ValueRow(title: String(localized: "估算健康度"), value: MetricFormat.percent(battery.healthPercent), symbol: "heart.fill", tint: .pink)
+                        ValueRow(title: String(localized: "电池温度"), value: MetricFormat.temperature(battery.temperatureCelsius), symbol: "thermometer.medium", tint: .orange)
+                        ValueRow(title: String(localized: "当前容量"), value: capacity(battery.currentCapacityMAh), symbol: "battery.50percent")
+                        ValueRow(title: String(localized: "最大容量"), value: capacity(battery.maxCapacityMAh), symbol: "battery.100percent")
+                        ValueRow(title: String(localized: "设计容量"), value: capacity(battery.designCapacityMAh), symbol: "ruler")
                         // 主动点破两把尺子:mAh 是原始电量计刻度,和上面圆环的
                         // 显示百分比刻度不同,手算相除对不上是正常的。
-                        Text("容量为原始电量计读数,与显示百分比是两套刻度,相除对不上环上的数字属正常。")
+                        Text(String(localized: "容量为原始电量计读数,与显示百分比是两套刻度,相除对不上环上的数字属正常。"))
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -472,7 +472,7 @@ struct BatteryView: View {
     }
 
     private func capacity(_ value: Int?) -> String {
-        value.map { "\($0) mAh" } ?? "不可用"
+        value.map { "\($0) mAh" } ?? String(localized: "不可用")
     }
 
     /// 充电链路：充电器 → 线缆 → 协商结果，配一句话结论。
@@ -484,7 +484,7 @@ struct BatteryView: View {
         let diagnosis = model.chargeLinkDiagnosis
         LiquidCard {
             VStack(alignment: .leading, spacing: 10) {
-                SectionHeader(title: "充电链路", subtitle: portLabel(link))
+                SectionHeader(title: String(localized: "充电链路"), subtitle: portLabel(link))
 
                 if let diagnosis {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
@@ -503,20 +503,20 @@ struct BatteryView: View {
                 }
 
                 ValueRow(
-                    title: "充电器上限",
-                    value: link.chargerMaxWatts.map { "\($0)W · \(link.chargerOptions.count) 档" } ?? "不可用",
+                    title: String(localized: "充电器上限"),
+                    value: link.chargerMaxWatts.map { String(format: String(localized: "%@W · %@ 档"), String(describing: $0), String(describing: link.chargerOptions.count)) } ?? String(localized: "不可用"),
                     symbol: "powerplug.fill",
                     tint: .blue
                 )
                 ValueRow(
-                    title: "线缆额定",
+                    title: String(localized: "线缆额定"),
                     value: cableRatingText(link),
                     symbol: "cable.connector",
                     tint: .teal
                 )
                 ValueRow(
-                    title: "实际协商",
-                    value: link.negotiated.map { "\($0.wattsLabel)（\($0.voltsAmpsLabel)）" } ?? "协商中",
+                    title: String(localized: "实际协商"),
+                    value: link.negotiated.map { "\($0.wattsLabel)（\($0.voltsAmpsLabel)）" } ?? String(localized: "协商中"),
                     symbol: "bolt.fill",
                     tint: .green
                 )
@@ -532,7 +532,7 @@ struct BatteryView: View {
 
     private func portLabel(_ link: ChargeLinkSnapshot) -> String {
         link.portTypeDescription == "USB-C"
-            ? "USB-C \(link.portNumber) 号口"
+            ? String(format: String(localized: "USB-C %@ 号口"), String(describing: link.portNumber))
             : link.portTypeDescription
     }
 
@@ -542,13 +542,13 @@ struct BatteryView: View {
         }
         // 没有 e-marker 应答：USB-C 上这是「无芯片线」这个事实（PD 按 3A 封顶）；
         // MagSafe 线不走 SOP' 应答，读不到是常态，不能当成线的属性来展示。
-        return link.portTypeDescription == "USB-C" ? "无身份芯片 · 按 3A 上限" : "不适用（MagSafe）"
+        return link.portTypeDescription == "USB-C" ? String(localized: "无身份芯片 · 按 3A 上限") : String(localized: "不适用（MagSafe）")
     }
 
     private func cableFootnote(_ cable: CableEmarkerInfo) -> String {
-        var parts = [cable.typeLabel, cable.speedLabel, String(format: "厂商 0x%04X", cable.vendorID)]
+        var parts = [cable.typeLabel, cable.speedLabel, String(format: String(localized: "厂商 0x%04X"), cable.vendorID)]
         if cable.eprCapable { parts.append("EPR") }
-        if cable.hasCertificationID { parts.append("USB-IF 认证") }
+        if cable.hasCertificationID { parts.append(String(localized: "USB-IF 认证")) }
         return parts.joined(separator: " · ")
     }
 
@@ -560,7 +560,7 @@ struct BatteryView: View {
         return LiquidCard {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader(
-                    title: "睡眠掉电",
+                    title: String(localized: "睡眠掉电"),
                     subtitle: session.start.formatted(.dateTime.month().day().hour().minute())
                 )
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -584,7 +584,7 @@ struct BatteryView: View {
                             symbol: "moon.zzz"
                         )
                     }
-                    Text("数据来自系统电源日志,掉电量是入睡与醒来时的实测差值。")
+                    Text(String(localized: "数据来自系统电源日志,掉电量是入睡与醒来时的实测差值。"))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -594,7 +594,7 @@ struct BatteryView: View {
 
     private func sleepRowValue(_ session: SleepSession) -> String {
         String(
-            format: "%.1fh 掉 %d%% · 唤醒 %d 次",
+            format: String(localized: "%.1fh 掉 %d%% · 唤醒 %d 次"),
             session.hours, max(0, session.droppedPercent), session.darkWakeCount
         )
     }
@@ -603,7 +603,7 @@ struct BatteryView: View {
     private var peripheralBatteryCard: some View {
         LiquidCard {
             VStack(spacing: 12) {
-                SectionHeader(title: "外设电量")
+                SectionHeader(title: String(localized: "外设电量"))
                 ForEach(model.peripheralBatteries) { device in
                     ValueRow(
                         title: device.name,
@@ -618,19 +618,19 @@ struct BatteryView: View {
 
     private func peripheralValue(_ device: PeripheralBattery) -> String {
         var parts: [String] = []
-        if let left = device.percentLeft { parts.append("左 \(left)%") }
-        if let right = device.percentRight { parts.append("右 \(right)%") }
-        if let box = device.percentCase { parts.append("盒 \(box)%") }
+        if let left = device.percentLeft { parts.append(String(format: String(localized: "左 %@%%"), String(describing: left))) }
+        if let right = device.percentRight { parts.append(String(format: String(localized: "右 %@%%"), String(describing: right))) }
+        if let box = device.percentCase { parts.append(String(format: String(localized: "盒 %@%%"), String(describing: box))) }
         if parts.isEmpty, let main = device.percentMain { parts.append("\(main)%") }
-        return parts.isEmpty ? "不可用" : parts.joined(separator: " · ")
+        return parts.isEmpty ? String(localized: "不可用") : parts.joined(separator: " · ")
     }
 
     private func peripheralSymbol(_ name: String) -> String {
         let lower = name.lowercased()
         if lower.contains("airpods") { return "airpods" }
-        if lower.contains("keyboard") || name.contains("键盘") { return "keyboard" }
-        if lower.contains("trackpad") || name.contains("妙控板") { return "rectangle.and.hand.point.up.left" }
-        if lower.contains("mouse") || name.contains("鼠标") { return "computermouse" }
+        if lower.contains("keyboard") || name.contains(String(localized: "键盘")) { return "keyboard" }
+        if lower.contains("trackpad") || name.contains(String(localized: "妙控板")) { return "rectangle.and.hand.point.up.left" }
+        if lower.contains("mouse") || name.contains(String(localized: "鼠标")) { return "computermouse" }
         return "antenna.radiowaves.left.and.right"
     }
 
@@ -646,9 +646,9 @@ struct BatteryView: View {
     private func estimateRowTitle(_ basis: RuntimeBasis) -> String {
         guard isChargingEstimate else { return basis.title }
         switch basis {
-        case .instant: return "按当前充电速率"
-        case .learned: return "按你的充电分段"
-        case .gauge: return "系统电量计"
+        case .instant: return String(localized: "按当前充电速率")
+        case .learned: return String(localized: "按你的充电分段")
+        case .gauge: return String(localized: "系统电量计")
         case .blended: return basis.title
         }
     }
@@ -661,14 +661,14 @@ struct BatteryView: View {
                 // 空卡不再打肿脸:没有任何候选时,置信度副题(会显示
                 // 「负载波动较大,给出区间」却给不出区间)一并压掉,换一句实话。
                 SectionHeader(
-                    title: isChargingEstimate ? "充满估算" : "续航估算",
+                    title: isChargingEstimate ? String(localized: "充满估算") : String(localized: "续航估算"),
                     subtitle: estimate.candidates.isEmpty ? nil : estimate.confidence.title
                 )
 
                 if estimate.candidates.isEmpty {
                     Text(battery.state == .full
-                        ? "电池已满,无需估算"
-                        : "正在积累实测数据,稍后给出估算")
+                        ? String(localized: "电池已满,无需估算")
+                        : String(localized: "正在积累实测数据,稍后给出估算"))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -686,7 +686,7 @@ struct BatteryView: View {
                 if !estimate.candidates.isEmpty {
                     Divider()
                     ValueRow(
-                        title: isChargingEstimate ? "综合充满估算" : "综合估算",
+                        title: isChargingEstimate ? String(localized: "综合充满估算") : String(localized: "综合估算"),
                         value: MetricFormat.runtime(estimate),
                         symbol: "sparkles",
                         tint: MacPulseTheme.normal
@@ -700,14 +700,14 @@ struct BatteryView: View {
                     .foregroundStyle(.secondary)
 
                 if estimate.rejectedSystemEstimate, let system = estimate.systemEstimateMinutes {
-                    Text("系统给的是 \(MetricFormat.duration(system))——那是 powerd 的上限值，不是测量值，已排除。")
+                    Text(String(format: String(localized: "系统给的是 %@——那是 powerd 的上限值，不是测量值，已排除。"), String(describing: MetricFormat.duration(system))))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if !isChargingEstimate, let brightness = model.backlight?.brightnessFraction {
-                    Text("当前亮度 \(Int(brightness * 100))%。耗电估算按你在这个亮度和负载下的实测用电学习，不是按标称值推算。")
+                    Text(String(format: String(localized: "当前亮度 %@%%。耗电估算按你在这个亮度和负载下的实测用电学习，不是按标称值推算。"), String(describing: Int(brightness * 100))))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -727,10 +727,10 @@ struct BatteryView: View {
 
     private var powerSourceTitle: String {
         switch battery.powerSource {
-        case .battery: "电池"
-        case .external: "外接电源"
+        case .battery: String(localized: "电池")
+        case .external: String(localized: "外接电源")
         case .ups: "UPS"
-        case .unknown: battery.adapterAttached == true ? "检测到适配器" : "不可用"
+        case .unknown: battery.adapterAttached == true ? String(localized: "检测到适配器") : String(localized: "不可用")
         }
     }
 }
@@ -807,12 +807,12 @@ struct HistoryView: View {
         ScrollView {
             VStack(spacing: 12) {
                 HStack {
-                    Picker("指标", selection: $metric) {
-                        ForEach(HistoryMetric.allCases) { Text($0.rawValue).tag($0) }
+                    Picker(String(localized: "指标"), selection: $metric) {
+                        ForEach(HistoryMetric.allCases) { Text(L($0.rawValue)).tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    Picker("范围", selection: $range) {
-                        ForEach(HistoryRange.allCases) { Text($0.rawValue).tag($0) }
+                    Picker(String(localized: "范围"), selection: $range) {
+                        ForEach(HistoryRange.allCases) { Text(L($0.rawValue)).tag($0) }
                     }
                     .pickerStyle(.menu)
                     .frame(width: 96)
@@ -820,14 +820,14 @@ struct HistoryView: View {
 
                 LiquidCard {
                     VStack(alignment: .leading, spacing: 12) {
-                        SectionHeader(title: metric.rawValue + "趋势", subtitle: range.rawValue)
+                        SectionHeader(title: String(format: String(localized: "%@趋势"), L(metric.rawValue)), subtitle: L(range.rawValue))
 
                         if filteredPoints.count < 2 {
                             // 一个点画不成线,和零个点同样按空态处理。
                             ContentUnavailableView(
-                                "这个指标还没有足够的历史数据",
+                                String(localized: "这个指标还没有足够的历史数据"),
                                 systemImage: "chart.xyaxis.line",
-                                description: Text("MacPulse 每分钟保存一个聚合点")
+                                description: Text(String(localized: "MacPulse 每分钟保存一个聚合点"))
                             )
                             .frame(height: 210)
                         } else {
@@ -835,7 +835,7 @@ struct HistoryView: View {
                                 ForEach(filteredPoints) { point in
                                     if let reading = value(point) {
                                         AreaMark(
-                                            x: .value("时间", point.timestamp),
+                                            x: .value(String(localized: "时间"), point.timestamp),
                                             y: .value(metric.rawValue, reading)
                                         )
                                         .interpolationMethod(.catmullRom)
@@ -847,7 +847,7 @@ struct HistoryView: View {
                                             )
                                         )
                                         LineMark(
-                                            x: .value("时间", point.timestamp),
+                                            x: .value(String(localized: "时间"), point.timestamp),
                                             y: .value(metric.rawValue, reading)
                                         )
                                         .interpolationMethod(.catmullRom)
@@ -857,10 +857,10 @@ struct HistoryView: View {
                                 }
 
                                 if let selectedPoint, let reading = value(selectedPoint) {
-                                    RuleMark(x: .value("选择时间", selectedPoint.timestamp))
+                                    RuleMark(x: .value(String(localized: "选择时间"), selectedPoint.timestamp))
                                         .foregroundStyle(.secondary.opacity(0.45))
                                     PointMark(
-                                        x: .value("选择时间", selectedPoint.timestamp),
+                                        x: .value(String(localized: "选择时间"), selectedPoint.timestamp),
                                         y: .value(metric.rawValue, reading)
                                     )
                                     .symbolSize(55)
@@ -929,11 +929,11 @@ struct HistoryView: View {
         LiquidCard {
             let values = filteredPoints.compactMap(value).filter(\.isFinite)
             return HStack {
-                summaryValue("平均", values.isEmpty ? nil : values.reduce(0, +) / Double(values.count))
+                summaryValue(String(localized: "平均"), values.isEmpty ? nil : values.reduce(0, +) / Double(values.count))
                 Divider().frame(height: 32)
-                summaryValue("最低", values.min())
+                summaryValue(String(localized: "最低"), values.min())
                 Divider().frame(height: 32)
-                summaryValue("最高", values.max())
+                summaryValue(String(localized: "最高"), values.max())
             }
         }
     }
@@ -1044,7 +1044,7 @@ struct SettingsView: View {
                 }
                 .toggleStyle(.checkbox)
             }
-            Text("紧凑模式只显示所选的第一项;读不到的指标自动跳过。")
+            Text(String(localized: "紧凑模式只显示所选的第一项;读不到的指标自动跳过。"))
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -1054,14 +1054,14 @@ struct SettingsView: View {
     /// 把流量代价直接摆在开关下面。用户选的是「每次打开都完整测」，
     /// 那就该让他随时看得见这个选择每月要花多少流量。
     private var networkDataCostNote: String {
-        guard networkAutoRun else { return "已关闭自动测速，仍可在网络页手动点「重新测速」。" }
+        guard networkAutoRun else { return String(localized: "已关闭自动测速，仍可在网络页手动点「重新测速」。") }
         switch NetworkTestTier(rawValue: networkTestTier) ?? .standard {
         case .standard:
-            return "每次约 78 MB(含预热块)。按一天开 10 次估算约 780 MB/天、23 GB/月。"
+            return String(localized: "每次约 78 MB(含预热块)。按一天开 10 次估算约 780 MB/天、23 GB/月。")
         case .thrifty:
-            return "每次约 20 MB(含预热块)。按一天开 10 次估算约 200 MB/天、6 GB/月。"
+            return String(localized: "每次约 20 MB(含预热块)。按一天开 10 次估算约 200 MB/天、6 GB/月。")
         case .light:
-            return "每次约 35 KB，只测延迟与连通性，不测下载上传速度。"
+            return String(localized: "每次约 35 KB，只测延迟与连通性，不测下载上传速度。")
         }
     }
     @State private var launchAtLogin = false
@@ -1076,11 +1076,11 @@ struct SettingsView: View {
             VStack(spacing: 12) {
                 LiquidCard {
                     VStack(spacing: 14) {
-                        SectionHeader(title: "常规")
+                        SectionHeader(title: String(localized: "常规"))
                         HStack {
-                            settingLabel("菜单栏显示", "空间不足时可切换紧凑或仅图标", "menubar.rectangle")
+                            settingLabel(String(localized: "菜单栏显示"), String(localized: "空间不足时可切换紧凑或仅图标"), "menubar.rectangle")
                             Spacer()
-                            Picker("菜单栏显示", selection: $menuBarDisplayMode) {
+                            Picker(String(localized: "菜单栏显示"), selection: $menuBarDisplayMode) {
                                 ForEach(MenuBarDisplayMode.allCases) { mode in
                                     Text(mode.title).tag(mode.rawValue)
                                 }
@@ -1092,11 +1092,11 @@ struct SettingsView: View {
                             menuBarMetricToggles
                         }
                         Toggle(isOn: $menuBarSparkline) {
-                            settingLabel("菜单栏走势图", "用最近功率的火花线代替图标", "waveform.path.ecg")
+                            settingLabel(String(localized: "菜单栏走势图"), String(localized: "用最近功率的火花线代替图标"), "waveform.path.ecg")
                         }
                         Divider()
                         Toggle(isOn: $launchAtLogin) {
-                            settingLabel("登录时启动", "开机后自动常驻菜单栏", "arrow.clockwise.circle")
+                            settingLabel(String(localized: "登录时启动"), String(localized: "开机后自动常驻菜单栏"), "arrow.clockwise.circle")
                         }
                         .onChange(of: launchAtLogin) { _, value in
                             do {
@@ -1115,7 +1115,7 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                             Spacer()
                             if loginStatus == .requiresApproval {
-                                Button("打开系统设置") {
+                                Button(String(localized: "打开系统设置")) {
                                     LoginItemService.openSystemSettings()
                                 }
                                 .buttonStyle(.link)
@@ -1123,7 +1123,7 @@ struct SettingsView: View {
                         }
                         Divider()
                         Toggle(isOn: $notificationsEnabled) {
-                            settingLabel("本地提醒", "高温、热压力和健康度提醒", "bell.badge")
+                            settingLabel(String(localized: "本地提醒"), String(localized: "高温、热压力和健康度提醒"), "bell.badge")
                         }
                         notificationPermissionRow
                     }
@@ -1131,18 +1131,18 @@ struct SettingsView: View {
 
                 LiquidCard {
                     VStack(alignment: .leading, spacing: 13) {
-                        SectionHeader(title: "提醒规则")
-                        Toggle("电池持续高温", isOn: $temperatureAlertsEnabled)
-                        Toggle("系统热压力", isOn: $thermalAlertsEnabled)
-                        Toggle("电池健康度低于 80%", isOn: $healthAlertsEnabled)
+                        SectionHeader(title: String(localized: "提醒规则"))
+                        Toggle(String(localized: "电池持续高温"), isOn: $temperatureAlertsEnabled)
+                        Toggle(String(localized: "系统热压力"), isOn: $thermalAlertsEnabled)
+                        Toggle(String(localized: "电池健康度低于 80%"), isOn: $healthAlertsEnabled)
                         if !notificationsEnabled {
-                            Text("本地提醒已关闭,以上规则暂不生效。")
+                            Text(String(localized: "本地提醒已关闭,以上规则暂不生效。"))
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         }
                         Divider()
                         HStack {
-                            Text("电池持续两分钟高于")
+                            Text(String(localized: "电池持续两分钟高于"))
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                             Spacer()
@@ -1162,11 +1162,11 @@ struct SettingsView: View {
                         .foregroundStyle(.tertiary)
                         Divider()
                         HStack {
-                            Text("重复提醒冷却")
+                            Text(String(localized: "重复提醒冷却"))
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            Text("\(Int(alertCooldownMinutes)) 分钟")
+                            Text(String(format: String(localized: "%@ 分钟"), String(describing: Int(alertCooldownMinutes))))
                                 .font(.callout.weight(.bold))
                                 .monospacedDigit()
                         }
@@ -1180,10 +1180,10 @@ struct SettingsView: View {
 
                 LiquidCard {
                     VStack(alignment: .leading, spacing: 11) {
-                        SectionHeader(title: "隐私与采集")
-                        Label("所有历史数据仅保存在这台 Mac", systemImage: "lock.shield.fill")
+                        SectionHeader(title: String(localized: "隐私与采集"))
+                        Label(String(localized: "所有历史数据仅保存在这台 Mac"), systemImage: "lock.shield.fill")
                             .foregroundStyle(MacPulseTheme.normal)
-                        Text("除网络测速外，MacPulse 不发送任何网络请求。深度硬件数据由 App 内的原生传感器采集器读取（IOReport + SMC，思路改编自 mactop 与 Stats，均为 MIT，见第三方声明）；传感器不可用时自动退回基础模式。")
+                        Text(String(localized: "除网络测速外，MacPulse 不发送任何网络请求。深度硬件数据由 App 内的原生传感器采集器读取（IOReport + SMC，思路改编自 mactop 与 Stats，均为 MIT，见第三方声明）；传感器不可用时自动退回基础模式。"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1200,12 +1200,12 @@ struct SettingsView: View {
 
                         Toggle(isOn: $networkAutoRun) {
                             settingLabel(
-                                "打开面板时自动测速",
-                                "只连接 speed.cloudflare.com 公开测速节点",
+                                String(localized: "打开面板时自动测速"),
+                                String(localized: "只连接 speed.cloudflare.com 公开测速节点"),
                                 "wifi"
                             )
                         }
-                        Picker("测速强度", selection: $networkTestTier) {
+                        Picker(String(localized: "测速强度"), selection: $networkTestTier) {
                             ForEach(NetworkTestTier.allCases) { tier in
                                 Text("\(tier.title)（\(tier.dataCostDescription)）").tag(tier.rawValue)
                             }
@@ -1215,7 +1215,7 @@ struct SettingsView: View {
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("测速只发送无意义的填充字节用于计时，不发送设备信息、进程名、电池数据或任何标识符。对方能看到的只有你的公网 IP 和由 IP 推断的大致地区——这是任何网络请求都无法避免的。结果只写入本机 network.store，不含 IP、Wi-Fi 名称或精确位置。热点与低数据模式下永不自动进行完整测速。")
+                        Text(String(localized: "测速只发送无意义的填充字节用于计时，不发送设备信息、进程名、电池数据或任何标识符。对方能看到的只有你的公网 IP 和由 IP 推断的大致地区——这是任何网络请求都无法避免的。结果只写入本机 network.store，不含 IP、Wi-Fi 名称或精确位置。热点与低数据模式下永不自动进行完整测速。"))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1223,8 +1223,8 @@ struct SettingsView: View {
                         Divider()
                         Toggle(isOn: $processMonitoringEnabled) {
                             settingLabel(
-                                "进程监控",
-                                "查看 App、后台和系统进程的本机负担",
+                                String(localized: "进程监控"),
+                                String(localized: "查看 App、后台和系统进程的本机负担"),
                                 "list.bullet.rectangle"
                             )
                         }
@@ -1233,8 +1233,8 @@ struct SettingsView: View {
                         }
                         Toggle(isOn: $processHistoryEnabled) {
                             settingLabel(
-                                "重点进程 7 天历史",
-                                "每分钟只保存 MacPulse 与综合排行前五名",
+                                String(localized: "重点进程 7 天历史"),
+                                String(localized: "每分钟只保存 MacPulse 与综合排行前五名"),
                                 "clock.arrow.trianglehead.counterclockwise.rotate.90"
                             )
                         }
@@ -1262,7 +1262,7 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button("退出 MacPulse") {
+                    Button(String(localized: "退出 MacPulse")) {
                         NSApp.terminate(nil)
                     }
                     .buttonStyle(.borderless)
@@ -1291,8 +1291,8 @@ struct SettingsView: View {
     private var healthReportCard: some View {
         LiquidCard {
             VStack(alignment: .leading, spacing: 10) {
-                SectionHeader(title: "体检报告")
-                Text("把电池、充电、内存、温度、睡眠、存储、自启与显示器的结论汇成一页,可直接复制粘贴。报告不含序列号、网络名称、IP、用户名或文件路径。")
+                SectionHeader(title: String(localized: "体检报告"))
+                Text(String(localized: "把电池、充电、内存、温度、睡眠、存储、自启与显示器的结论汇成一页,可直接复制粘贴。报告不含序列号、网络名称、IP、用户名或文件路径。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1302,7 +1302,7 @@ struct SettingsView: View {
                         reportText = report.markdown()
                         showReport = true
                     } label: {
-                        Label("生成报告", systemImage: "stethoscope")
+                        Label(String(localized: "生成报告"), systemImage: "stethoscope")
                     }
                     .buttonStyle(.borderedProminent)
                     if !reportText.isEmpty {
@@ -1312,7 +1312,7 @@ struct SettingsView: View {
                             copiedAt = .now
                         } label: {
                             Label(
-                                copiedAt.map { Date().timeIntervalSince($0) < 3 } == true ? "已复制" : "复制",
+                                copiedAt.map { Date().timeIntervalSince($0) < 3 } == true ? String(localized: "已复制") : String(localized: "复制"),
                                 systemImage: "doc.on.doc"
                             )
                         }
@@ -1340,27 +1340,27 @@ struct SettingsView: View {
     /// 任何一行不可用都只是缺数据,不是故障,App 其余部分照常工作。
     private var sensorCoverageCard: some View {
         let deep = model.current.deep
-        func mark(_ available: Bool) -> String { available ? "✓" : "不可用" }
+        func mark(_ available: Bool) -> String { available ? "✓" : String(localized: "不可用") }
         return LiquidCard {
             VStack(alignment: .leading, spacing: 11) {
-                SectionHeader(title: "本机传感器覆盖", subtitle: deep.chip?.name ?? "未识别")
-                ValueRow(title: "深度采集器", value: model.collectorStatus.phase == .live ? "✓ 实时" : model.collectorStatus.phase == .degraded ? "部分可用" : "未连接", symbol: "antenna.radiowaves.left.and.right")
-                ValueRow(title: "功耗轨(IOReport)", value: mark(deep.cpuPowerWatts != nil), symbol: "bolt.horizontal")
-                ValueRow(title: "集群频率(pmgr)", value: mark(deep.socCompute?.eClusterFreqMHz != nil), symbol: "gauge.with.dots.needle.50percent")
-                ValueRow(title: "温度传感器(SMC)", value: (deep.thermalGroups?.isEmpty == false) ? "✓ \(deep.thermalGroups!.count) 组" : "不可用", symbol: "thermometer.medium")
+                SectionHeader(title: String(localized: "本机传感器覆盖"), subtitle: deep.chip?.name ?? String(localized: "未识别"))
+                ValueRow(title: String(localized: "深度采集器"), value: model.collectorStatus.phase == .live ? String(localized: "✓ 实时") : model.collectorStatus.phase == .degraded ? String(localized: "部分可用") : String(localized: "未连接"), symbol: "antenna.radiowaves.left.and.right")
+                ValueRow(title: String(localized: "功耗轨(IOReport)"), value: mark(deep.cpuPowerWatts != nil), symbol: "bolt.horizontal")
+                ValueRow(title: String(localized: "集群频率(pmgr)"), value: mark(deep.socCompute?.eClusterFreqMHz != nil), symbol: "gauge.with.dots.needle.50percent")
+                ValueRow(title: String(localized: "温度传感器(SMC)"), value: (deep.thermalGroups?.isEmpty == false) ? String(format: String(localized: "✓ %@ 组"), String(describing: deep.thermalGroups!.count)) : String(localized: "不可用"), symbol: "thermometer.medium")
                 // 这两项依赖插电状态:拔电时读不到是物理,不是机器不支持。
                 ValueRow(
-                    title: "电源输入(PDTR)",
-                    value: model.current.battery.powerSource == .external ? mark(deep.dcInputWatts != nil) : "插电时检测",
+                    title: String(localized: "电源输入(PDTR)"),
+                    value: model.current.battery.powerSource == .external ? mark(deep.dcInputWatts != nil) : String(localized: "插电时检测"),
                     symbol: "powerplug"
                 )
-                ValueRow(title: "风扇", value: deep.isUnsupported(SensorAvailabilityKey.fans) ? "本机型无风扇" : "存在", symbol: "fan")
+                ValueRow(title: String(localized: "风扇"), value: deep.isUnsupported(SensorAvailabilityKey.fans) ? String(localized: "本机型无风扇") : String(localized: "存在"), symbol: "fan")
                 ValueRow(
-                    title: "充电协商节点(PD)",
-                    value: model.current.battery.powerSource == .external ? mark(model.chargeLink != nil) : "插电时检测",
+                    title: String(localized: "充电协商节点(PD)"),
+                    value: model.current.battery.powerSource == .external ? mark(model.chargeLink != nil) : String(localized: "插电时检测"),
                     symbol: "cable.connector"
                 )
-                Text("读不到的项在别的机型上属预期(如 Intel 无功耗轨、M1 Pro/Max/Ultra 的 USB-C 无协商节点),对应功能会如实隐藏,其余照常。")
+                Text(String(localized: "读不到的项在别的机型上属预期(如 Intel 无功耗轨、M1 Pro/Max/Ultra 的 USB-C 无协商节点),对应功能会如实隐藏,其余照常。"))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1385,13 +1385,13 @@ struct SettingsView: View {
             Spacer()
             switch model.notificationAuthorizationStatus {
             case .notDetermined:
-                Button("允许通知") {
+                Button(String(localized: "允许通知")) {
                     model.requestNotificationAuthorization()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
             case .denied:
-                Button("打开系统设置") {
+                Button(String(localized: "打开系统设置")) {
                     model.openNotificationSettings()
                 }
                 .buttonStyle(.link)
@@ -1403,12 +1403,12 @@ struct SettingsView: View {
 
     private var notificationPermissionText: String {
         switch model.notificationAuthorizationStatus {
-        case .authorized: "系统通知权限已允许"
-        case .provisional: "系统通知为临时允许"
-        case .denied: "系统通知权限已关闭"
-        case .notDetermined: "尚未请求系统通知权限"
-        case .ephemeral: "系统通知为临时授权"
-        @unknown default: "系统通知权限状态未知"
+        case .authorized: String(localized: "系统通知权限已允许")
+        case .provisional: String(localized: "系统通知为临时允许")
+        case .denied: String(localized: "系统通知权限已关闭")
+        case .notDetermined: String(localized: "尚未请求系统通知权限")
+        case .ephemeral: String(localized: "系统通知为临时授权")
+        @unknown default: String(localized: "系统通知权限状态未知")
         }
     }
 

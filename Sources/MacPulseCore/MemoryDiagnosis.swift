@@ -72,32 +72,32 @@ public struct MemoryDiagnosis: Codable, Sendable, Equatable {
         if pressure >= 2 || swap >= heavySwapBytes {
             return MemoryDiagnosis(
                 kind: .insufficient,
-                summary: "内存长期不足",
+                summary: String(localized: "内存长期不足"),
                 detail: String(
-                    format: "%@ 内存已换出 %.1f GB 到磁盘%@。内存装不下时系统要反复读写硬盘,机器会明显变卡,SSD 也多受一份磨损。",
-                    totalText, swapGB, pressure >= 2 ? ",且系统正报告内存压力" : ""
+                    format: String(localized: "%@ 内存已换出 %.1f GB 到磁盘%@。内存装不下时系统要反复读写硬盘,机器会明显变卡,SSD 也多受一份磨损。"),
+                    totalText, swapGB, pressure >= 2 ? String(localized: ",且系统正报告内存压力") : ""
                 ),
-                advice: "如果这是常态,下次换机建议直接上更大内存;眼下可以少开几个占内存的 App(内存页里按占用排序能看出是谁)。"
+                advice: String(localized: "如果这是常态,下次换机建议直接上更大内存;眼下可以少开几个占内存的 App(内存页里按占用排序能看出是谁)。")
             )
         }
 
         if swap >= mildSwapBytes || compressionRatio >= heavyCompressionRatio {
             return MemoryDiagnosis(
                 kind: .occasionalPressure,
-                summary: "偶尔吃紧,但还撑得住",
+                summary: String(localized: "偶尔吃紧,但还撑得住"),
                 detail: String(
-                    format: "%@ 内存换出了 %.1f GB,压缩内存占 %.0f%%——系统在腾地方,但还没到报警的程度。",
+                    format: String(localized: "%@ 内存换出了 %.1f GB,压缩内存占 %.0f%%——系统在腾地方,但还没到报警的程度。"),
                     totalText, swapGB, compressionRatio * 100
                 ),
-                advice: "多发生在同时开很多 App 时。想更顺手可以关掉不用的窗口,不必急着加内存。"
+                advice: String(localized: "多发生在同时开很多 App 时。想更顺手可以关掉不用的窗口,不必急着加内存。")
             )
         }
 
         return MemoryDiagnosis(
             kind: .comfortable,
-            summary: "内存充裕",
+            summary: String(localized: "内存充裕"),
             detail: String(
-                format: "%@ 内存,换页 %.1f GB、压缩占 %.0f%%,都在健康范围。「已用」偏高是正常的——macOS 会把闲置内存拿来做缓存,那是好事,不是不够用。",
+                format: String(localized: "%@ 内存,换页 %.1f GB、压缩占 %.0f%%,都在健康范围。「已用」偏高是正常的——macOS 会把闲置内存拿来做缓存,那是好事,不是不够用。"),
                 totalText, swapGB, compressionRatio * 100
             ),
             advice: nil

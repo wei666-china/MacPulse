@@ -71,6 +71,6 @@ enum DisplayReader {
                 .uint32Value == id
         }
         if let name = matched?.localizedName, !name.isEmpty { return name }
-        return isBuiltIn ? "内置显示器" : "外接显示器"
+        return isBuiltIn ? String(localized: "内置显示器") : String(localized: "外接显示器")
     }
 }
