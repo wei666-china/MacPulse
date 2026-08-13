@@ -1249,6 +1249,8 @@ struct SettingsView: View {
                     .font(.callout)
                 }
 
+                acknowledgementsCard
+
                 if let loginError {
                     Text(loginError)
                         .font(.caption)
@@ -1338,6 +1340,65 @@ struct SettingsView: View {
     /// 为开源准备的地基——MacPulse 只在一台 M5 Air 上实测过,装到别的
     /// 机器上,这张卡让用户第一眼看清自己机器的覆盖情况,报 issue 有的抄;
     /// 任何一行不可用都只是缺数据,不是故障,App 其余部分照常工作。
+    /// 致谢卡。MacPulse 的几块硬核能力是站在别人肩膀上学来的,
+    /// 这必须写在用户看得见的地方——只藏在仓库文件里不算尊重。
+    private var acknowledgementsCard: some View {
+        LiquidCard {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(title: String(localized: "致谢"))
+                Text(String(localized: "MacPulse 的关键读取技术学习并改编自以下开源项目(均为 MIT 许可),完整授权文本见 App 内附带的第三方声明:"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                acknowledgementRow(
+                    name: "mactop",
+                    author: "Carsen Klock",
+                    detail: String(localized: "IOReport 能耗与集群频率的原生读取思路"),
+                    url: "https://github.com/metaspartan/mactop"
+                )
+                acknowledgementRow(
+                    name: "Stats",
+                    author: "Serhiy Mytrovtsiy",
+                    detail: String(localized: "SMC 温度/功率读取的结构布局与类型解码"),
+                    url: "https://github.com/exelban/stats"
+                )
+                acknowledgementRow(
+                    name: "WhatCable",
+                    author: "Darryl Morley",
+                    detail: String(localized: "USB-C 充电口与线缆芯片的 PD 位解码、瓶颈判定"),
+                    url: "https://github.com/darrylmorley/whatcable"
+                )
+            }
+        }
+    }
+
+    private func acknowledgementRow(name: String, author: String, detail: String, url: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(name)
+                        .font(.callout.weight(.semibold))
+                    Text(author)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            if let link = URL(string: url) {
+                Link(destination: link) {
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.callout)
+                }
+                .foregroundStyle(.secondary)
+                .help(url)
+            }
+        }
+    }
+
     private var sensorCoverageCard: some View {
         let deep = model.current.deep
         func mark(_ available: Bool) -> String { available ? "✓" : String(localized: "不可用") }

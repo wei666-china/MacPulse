@@ -73,12 +73,23 @@ PHY 模式,不读 SSID 与信号强度,因此不需要定位权限。
 
 历史数据存于 `~/Library/Application Support/MacPulse/`。
 
-## 致谢
+## 致谢 / Acknowledgements
 
-传感器读取思路改编自 [mactop](https://github.com/metaspartan/mactop) 与
-[Stats](https://github.com/exelban/stats),充电链路的 PD 解码与判定改编自
-[WhatCable](https://github.com/darrylmorley/whatcable) —— 三者均为 MIT,
-完整授权文本见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+MacPulse 的几块核心读取能力,是在这些开源项目里学到的。点名致谢,逐项说明学了什么:
+
+| 项目 | 作者 | 我们学习/改编了什么 | 许可 |
+|---|---|---|---|
+| [mactop](https://github.com/metaspartan/mactop) | Carsen Klock | IOReport 能耗模型与集群频率的原生读取思路(dlsym 绑定、通道订阅、Δ能量→瓦特) | MIT |
+| [Stats](https://github.com/exelban/stats) | Serhiy Mytrovtsiy | AppleSMC 用户客户端的结构体布局、选择子与 sp78/flt/fpe2 类型解码 | MIT |
+| [WhatCable](https://github.com/darrylmorley/whatcable) | Darryl Morley | USB-C 充电口与线缆 e-marker 的 PD 位解码,以及充电瓶颈判定思路 | MIT |
+
+MacPulse's core reading techniques were learned from these projects — named here with exactly
+what was adapted, because that's what respect for other people's work looks like. Full license
+texts: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The same acknowledgements are shown
+inside the app (Settings → Acknowledgements).
+
+注:Stats 的 HID 温度传感器路径源自 GPL 血统的 MenuMeters,MacPulse **没有**采用那部分——
+只改编了其 MIT 许可范围内的 SMC 实现。
 
 ## License
 

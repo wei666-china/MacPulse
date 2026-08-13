@@ -618,3 +618,10 @@
 "高亮度" = "High brightness";
 "高温、热压力和健康度提醒" = "Heat, thermal-pressure and health alerts";
 "鼠标" = "Mouse";
+
+/* Acknowledgements card (Settings) */
+"致谢" = "Acknowledgements";
+"MacPulse 的关键读取技术学习并改编自以下开源项目(均为 MIT 许可),完整授权文本见 App 内附带的第三方声明:" = "MacPulse's key reading techniques were learned from and adapted from these open-source projects (all MIT-licensed). Full license texts ship with the app in the third-party notices:";
+"IOReport 能耗与集群频率的原生读取思路" = "Native IOReport energy and cluster-frequency reading approach";
+"SMC 温度/功率读取的结构布局与类型解码" = "SMC struct layout and type decoding for temperature and power reads";
+"USB-C 充电口与线缆芯片的 PD 位解码、瓶颈判定" = "USB-C PD bit decoding for charge ports and cable e-markers, and the bottleneck verdicts";
