@@ -73,8 +73,18 @@ struct LiquidCard<Content: View>: View {
     }
 }
 
+/// 台式 Mac(mini/Studio)没有电池:读不到任何电池硬件字段时,
+/// percentage 的 0 是假值——环必须显示占位,不许渲染「0%」。
+extension BatteryMetrics {
+    var hasReadableBattery: Bool {
+        designCapacityMAh != nil || currentCapacityMAh != nil
+            || healthPercent != nil || voltageVolts != nil
+    }
+}
+
 struct BatteryRing: View {
-    let percentage: Double
+    /// nil = 本机读不到电池(台式机),显示「—」占位。
+    let percentage: Double?
     let color: Color
     let isCharging: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -100,25 +110,29 @@ struct BatteryRing: View {
                 .stroke(.primary.opacity(0.08), lineWidth: 9)
             // 纯色平环,不加发光:仪表的精确感来自克制,辉光属于「科技气泡」。
             // 9pt 而不是 11pt:同直径下更细的环更像仪器刻度。
-            Circle()
-                .trim(from: 0, to: min(max(percentage / 100, 0), 1))
-                .stroke(color, style: StrokeStyle(lineWidth: 9, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(reduceMotion ? nil : .smooth(duration: 0.35), value: percentage)
+            if let percentage {
+                Circle()
+                    .trim(from: 0, to: min(max(percentage / 100, 0), 1))
+                    .stroke(color, style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(reduceMotion ? nil : .smooth(duration: 0.35), value: percentage)
+            }
 
             VStack(spacing: -1) {
-                Text("\(Int(percentage.rounded()))")
+                Text(percentage.map { "\(Int($0.rounded()))" } ?? "—")
                     .font(.system(size: 29, weight: .semibold))
                     .monospacedDigit()
                     .contentTransition(.numericText())
-                Text("%")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                if percentage != nil {
+                    Text("%")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .frame(width: 104, height: 104)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(String(format: String(localized: "电池电量 %@%%"), String(describing: Int(percentage.rounded()))))
+        .accessibilityLabel(percentage.map { String(format: String(localized: "电池电量 %@%%"), String(describing: Int($0.rounded()))) } ?? String(localized: "不可用"))
     }
 }
 

@@ -361,7 +361,14 @@ private struct PerCoreBars: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(String(localized: "每核占用"))
+            HStack(spacing: 6) {
+                Text(String(localized: "每核占用"))
+                // 口径注记:每核数据是 App 本机直接采样(host_processor_info),
+                // 不走采集器——这解释了为什么采集器断连时它照常更新。
+                Text(String(localized: "本机直接采样"))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -1034,8 +1041,20 @@ private struct ThermalGroupRow: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 44, alignment: .trailing)
             }
-            if let minimum = group.trustworthyMinimumCelsius, let maximum = group.maximumCelsius, maximum > minimum {
-                RangeBar(minimum: minimum, maximum: maximum, current: group.averageCelsius)
+            if let minimum = group.trustworthyMinimumCelsius, let maximum = group.maximumCelsius, maximum >= minimum {
+                // 两端标数值:光一条区间条读不出「区间是多少度到多少度」。
+                // min==max(单传感器组)也照画,点会落在中间,数值说明一切。
+                HStack(spacing: 6) {
+                    Text(MetricFormat.temperature(minimum))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                    RangeBar(minimum: minimum, maximum: maximum, current: group.averageCelsius)
+                    Text(MetricFormat.temperature(maximum))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                }
             }
         }
     }

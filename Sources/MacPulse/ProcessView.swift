@@ -273,21 +273,47 @@ private struct ProcessExplorerView: View {
         }
     }
 
+    /// 空态按采样阶段分开说:刚启动是「在建基线」不是「没进程」,
+    /// 睡眠是「暂停了」不是「坏了」——一句笼统的空态会让三种状态都像故障。
     private var emptyState: some View {
-        LiquidCard {
+        let (symbol, title, detail): (String, String, String) = switch model.processMonitorStatus.phase {
+        case .disabled: (
+            "pause.circle",
+            String(localized: "进程监控已关闭"),
+            String(localized: "可在设置中重新开启。")
+        )
+        case .starting: (
+            "hourglass",
+            String(localized: "正在建立进程基线"),
+            String(localized: "首次读取通常只需几秒钟。")
+        )
+        case .sleeping: (
+            "moon.zzz",
+            String(localized: "睡眠期间暂停进程采样"),
+            String(localized: "唤醒后自动恢复。")
+        )
+        case .unavailable: (
+            "exclamationmark.triangle",
+            String(localized: "无法读取当前进程列表"),
+            model.processMonitorStatus.errorMessage ?? String(localized: "稍后会自动重试。")
+        )
+        case .live, .partial: (
+            "magnifyingglass",
+            String(localized: "没有符合条件的进程"),
+            String(localized: "尝试清除搜索或切换分类。搜索只覆盖负载最高的 50 个 App，后台小工具可能不在其列。")
+        )
+        }
+        return LiquidCard {
             VStack(spacing: 8) {
-                Image(systemName: model.processMonitorStatus.phase == .disabled
-                      ? "pause.circle" : "magnifyingglass")
+                Image(systemName: symbol)
                     .font(.title2)
                     .foregroundStyle(.secondary)
-                Text(model.processMonitorStatus.phase == .disabled
-                     ? String(localized: "进程监控已关闭") : String(localized: "没有符合条件的进程"))
+                Text(title)
                     .font(.callout.weight(.semibold))
-                Text(model.processMonitorStatus.phase == .disabled
-                     ? String(localized: "可在设置中重新开启。")
-                     : String(localized: "尝试清除搜索或切换分类。搜索只覆盖负载最高的 50 个 App，后台小工具可能不在其列。"))
+                Text(detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity)
         }

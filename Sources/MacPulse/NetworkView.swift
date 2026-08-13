@@ -176,7 +176,7 @@ struct NetworkView: View {
                     )
                     Spacer(minLength: 0)
                     if model.isNetworkTestRunning {
-                        Button(String(localized: "停止")) { model.cancelNetworkTest() }
+                        Button(String(localized: "停止")) { model.stopNetworkTestGracefully() }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                     } else if consent == .granted {
@@ -215,9 +215,14 @@ struct NetworkView: View {
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     } else {
-                        resultGrid(result)
-                        footnote(result)
-                        detail(result)
+                        // 过期结果置灰:isStale 的阈值与「x 分钟前测得」同一套口径。
+                        // 数字继续可读(旧数据是诚实数据),但视觉上明确降级。
+                        Group {
+                            resultGrid(result)
+                            footnote(result)
+                            detail(result)
+                        }
+                        .opacity(NetworkMath.isStale(result.startedAt, now: .now) ? 0.55 : 1)
                     }
                 } else if consent == .denied {
                     Text(String(localized: "网络测速已关闭。上面的接口、发射速率和实时吞吐都是本机读数，不需要联网。"))
@@ -418,6 +423,12 @@ extension NetworkView {
                         .symbolSize(28)
                     }
                     .chartLegend(points.contains { $0.series != points[0].series } ? .visible : .hidden)
+                    // 多网络(家/公司)分序列时用墨阶区分,不让系统配色
+                    // (蓝橙绿)闯进单色设计——语义色只留给「好/注意/出事」。
+                    .chartForegroundStyleScale(
+                        domain: orderedSeries(points),
+                        range: seriesInkLadder(count: orderedSeries(points).count)
+                    )
                     .chartYAxis {
                         AxisMarks(position: .leading) { value in
                             AxisGridLine().foregroundStyle(.primary.opacity(0.06))
@@ -443,6 +454,22 @@ extension NetworkView {
         let date: Date
         let value: Double
         let series: String
+    }
+
+    /// 序列首次出现的顺序,给墨阶配色一个稳定的 domain。
+    private func orderedSeries(_ points: [TrendPoint]) -> [String] {
+        var seen = Set<String>(); var out: [String] = []
+        for p in points where !seen.contains(p.series) {
+            seen.insert(p.series); out.append(p.series)
+        }
+        return out
+    }
+
+    /// 单色墨阶:主序列最深,其余逐级变浅。四级封顶,更多序列共用最浅一档
+    /// (实际场景里超过四个常用网络的机器极罕见)。
+    private func seriesInkLadder(count: Int) -> [Color] {
+        let ladder: [Double] = [0.85, 0.5, 0.32, 0.2]
+        return (0..<max(count, 1)).map { .primary.opacity(ladder[min($0, ladder.count - 1)]) }
     }
 
     var trendPoints: [TrendPoint] {

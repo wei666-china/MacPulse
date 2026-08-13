@@ -625,3 +625,8 @@
 "IOReport 能耗与集群频率的原生读取思路" = "Native IOReport energy and cluster-frequency reading approach";
 "SMC 温度/功率读取的结构布局与类型解码" = "SMC struct layout and type decoding for temperature and power reads";
 "USB-C 充电口与线缆芯片的 PD 位解码、瓶颈判定" = "USB-C PD bit decoding for charge ports and cable e-markers, and the bottleneck verdicts";
+
+/* Backlog cleanup batch A */
+"分钟均值" = "minute avg";
+"本机直接采样" = "sampled on-device";
+"唤醒后自动恢复。" = "Resumes automatically after wake.";

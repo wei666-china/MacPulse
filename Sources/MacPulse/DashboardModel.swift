@@ -173,6 +173,8 @@ final class DashboardModel: ObservableObject {
         }
         networkTestStore = openedNetworkStore
         networkHistory = (try? openedNetworkStore?.loadRecent()) ?? []
+        // 启动回填:最近一条历史当作当前结果展示(带时效标注,过期会置灰)。
+        networkResult = networkHistory.last?.asResult()
         loadDrainProfile()
         backfillDrainProfileIfNeeded()
         estimateAccuracy = sessionTracker.accuracy()
@@ -443,6 +445,13 @@ final class DashboardModel: ObservableObject {
         scheduleNetworkTest(trigger: .manual)
     }
 
+    /// 优雅停止:让探针跑完当前块就收尾,半程数据按 partial 返回。
+    /// 用户主动点停止走这条路——已经花掉的流量不该白花。
+    /// 硬取消(cancelNetworkTest)留给睡眠与切网:跨睡眠的测量是垃圾。
+    func stopNetworkTestGracefully() {
+        Task { await networkProbe.requestGracefulStop() }
+    }
+
     func cancelNetworkTest() {
         networkTriggerTask?.cancel()
         networkTriggerTask = nil
@@ -564,10 +573,6 @@ final class DashboardModel: ObservableObject {
 
     var menuBarSymbol: String {
         current.battery.state.symbol
-    }
-
-    var chartPoints: [HistoryPoint] {
-        Array((history + liveHistory).suffix(10_080))
     }
 
     func start() {

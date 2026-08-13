@@ -121,6 +121,72 @@ final class NetworkTestRecord {
     }
 }
 
+extension NetworkTestRecord {
+    /// 反向转换:启动时把最近一条历史回填成「测速结果」。
+    /// 没有它,重启后结果卡永远「尚未测速」,但十分钟前明明测过——
+    /// 配合「x 分钟前测得」的时效标注与过期置灰,旧数据是诚实数据。
+    func asResult() -> NetworkTestResult {
+        NetworkTestResult(
+            startedAt: startedAt,
+            durationSeconds: durationSeconds,
+            tier: NetworkTestTier(rawValue: tierRaw) ?? .standard,
+            trigger: NetworkTestTrigger(rawValue: triggerRaw) ?? .panelOpen,
+            completeness: NetworkTestCompleteness(rawValue: completenessRaw) ?? .complete,
+            connectivity: NetworkConnectivity(rawValue: connectivityRaw) ?? .online,
+            link: interfaceName == nil && linkRateMbps == nil ? nil : NetworkLinkInfo(
+                interfaceName: interfaceName,
+                kind: interfaceKindRaw.flatMap(NetworkInterfaceKind.init(rawValue:)),
+                phyMode: wifiPHYMode,
+                generation: wifiGeneration,
+                linkRateMbps: linkRateMbps
+            ),
+            latency: latencyP50Ms.flatMap { p50 in
+                latencyP95Ms.map { p95 in
+                    LatencyEstimate(
+                        p50Milliseconds: p50,
+                        p95Milliseconds: p95,
+                        jitterMilliseconds: latencyJitterMs ?? 0,
+                        attempts: handshakeAttempts,
+                        failures: handshakeFailures,
+                        serverMinRttMilliseconds: latencyServerMinRttMs
+                    )
+                }
+            },
+            download: downloadBitsPerSecond.map {
+                ThroughputEstimate(
+                    bitsPerSecond: $0,
+                    lowBitsPerSecond: downloadLowBitsPerSecond ?? $0,
+                    highBitsPerSecond: downloadHighBitsPerSecond ?? $0,
+                    streams: downloadStreams,
+                    samples: downloadSamples
+                )
+            },
+            upload: uploadBitsPerSecond.map {
+                ThroughputEstimate(
+                    bitsPerSecond: $0,
+                    lowBitsPerSecond: uploadLowBitsPerSecond ?? $0,
+                    highBitsPerSecond: uploadHighBitsPerSecond ?? $0,
+                    streams: uploadStreams,
+                    samples: uploadSamples
+                )
+            },
+            singleStreamDownloadBitsPerSecond: singleStreamDownloadBitsPerSecond,
+            bufferbloatMilliseconds: bufferbloatMs,
+            dnsMilliseconds: dnsMs,
+            tcpMilliseconds: tcpMs,
+            tlsMilliseconds: tlsMs,
+            timeToFirstByteMilliseconds: ttfbMs,
+            dnsWasPossiblyCached: dnsWasCached,
+            ipv4Reachable: ipv4Reachable,
+            ipv6Reachable: ipv6Reachable,
+            serverColo: serverColo,
+            bytesDownloaded: bytesDownloaded,
+            bytesUploaded: bytesUploaded,
+            failureCode: failureCode
+        )
+    }
+}
+
 @MainActor
 final class NetworkTestStore {
     /// 90 天而不是 7 天：这个功能的意义就是纵向对比（「我家网是不是变慢了」），

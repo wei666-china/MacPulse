@@ -198,7 +198,7 @@ struct OverviewView: View {
             VStack(spacing: 14) {
                 HStack(spacing: 18) {
                     BatteryRing(
-                        percentage: snapshot.battery.percentage,
+                        percentage: snapshot.battery.hasReadableBattery ? snapshot.battery.percentage : nil,
                         color: statusColor,
                         isCharging: snapshot.battery.state == .charging
                     )
@@ -388,7 +388,7 @@ struct BatteryView: View {
                 LiquidCard {
                     HStack(spacing: 18) {
                         BatteryRing(
-                            percentage: battery.percentage,
+                            percentage: battery.hasReadableBattery ? battery.percentage : nil,
                             color: MacPulseTheme.statusColor(for: model.current),
                             isCharging: battery.state == .charging
                         )
@@ -905,6 +905,11 @@ struct HistoryView: View {
                             if let selectedPoint, let reading = value(selectedPoint) {
                                 HStack {
                                     Text(selectedPoint.timestamp, format: .dateTime.month().day().hour().minute())
+                                    // 口径后缀:图上每个点是分钟聚合均值,不是瞬时读数。
+                                    // 不点破,读者会拿它跟首页的实时数字对不上而怀疑数据。
+                                    Text(String(localized: "分钟均值"))
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
                                     Spacer()
                                     Text(formatHistoryValue(reading))
                                         .fontWeight(.semibold)
