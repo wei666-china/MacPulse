@@ -1,0 +1,40 @@
+#!/bin/bash
+#
+# 推送前跑一遍出门检查。装法(一次性,本机设置,不进版本控制):
+#
+#     git config core.hooksPath Tools/githooks
+#
+# 为什么用 core.hooksPath,不往 .git/hooks 里塞:.git 目录不进版本控制,
+# 塞进去的钩子换台机器、重新 clone 之后就没了,而「偶尔生效的门禁」
+# 跟没有门禁是同一件东西。放进 Tools/ 让它跟着仓库走。
+#
+# 这道门禁比 GitHub Actions 那道**覆盖更广**:CI 跑在虚拟机上,读不到
+# SMC / IOReport / 电池,传感器用例会成片跳过;这台机器有真硬件,
+# 只跳网络 opt-in 那几条。代价是它拦不住 `git push --no-verify`——
+# 那条留给真的十万火急,不是留给嫌它慢。
+#
+# 只对「推送分支代码」把关。以下两类直接放行,不跑测试:
+#   - 删除远端引用(删分支/删 tag):删东西不引入代码,拦它只添摩擦
+#   - 纯 tag 推送:tag 指向的提交在进 main 时已经过过门禁;备份 tag
+#     (pre-*)更是「动手前先备份」的保命动作,最不该被门禁拦住
+# stdin 每行格式:<local ref> <local sha> <remote ref> <remote sha>
+set -euo pipefail
+
+needs_check=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+    # 删除:local sha 全零
+    if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+        continue
+    fi
+    case "$local_ref" in
+        refs/tags/*) continue ;;
+    esac
+    needs_check=1
+done
+
+if [ "$needs_check" -eq 0 ]; then
+    printf 'pre-push: 本次只有 tag/删除,放行(分支代码推送才跑出门检查)。\n'
+    exit 0
+fi
+
+exec "$(git rev-parse --show-toplevel)/Tools/preflight.sh"

@@ -6,12 +6,12 @@
 #   → 左下「+」→ Developer ID Application
 # 苹果规定这张证书只能账号持有人签发,API 无法代劳。
 #
-# 用法:./Tools/notarize-release.sh [tag]   默认 tag = v3.0.0-beta.1
+# 用法:./Tools/notarize-release.sh [tag]   默认 tag = 最新的 v* 发布 tag
 
 set -e
 setopt no_nomatch 2>/dev/null || true
 
-TAG="${1:-v3.0.0-beta.1}"
+TAG="${1:-$(git describe --tags --abbrev=0 --match 'v*')}"
 PROJECT_ROOT="${0:A:h:h}"
 cd "$PROJECT_ROOT"
 

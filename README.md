@@ -8,7 +8,7 @@ MacPulse 是一款针对 Apple Silicon Mac 的原生菜单栏监控 App。充放
 |---|---|
 | ![总览](docs/images/overview.png) | ![性能](docs/images/performance.png) |
 
-> **状态:3.0.0-beta.2。** 目前只在一台 M5 MacBook Air 上完整实测过;跨机型行为(M1–M4、
+> **状态:3.0.0-beta.3。** 目前只在一台 M5 MacBook Air 上完整实测过;跨机型行为(M1–M4、
 > 带风扇机型)按上游语料与优雅降级设计推断。装好后打开「设置 → 本机传感器覆盖」,
 > 一眼看清你机器上每类数据源的可用情况——报 issue 时请附上这张卡的内容。
 
@@ -29,9 +29,26 @@ MacPulse 是一款针对 Apple Silicon Mac 的原生菜单栏监控 App。充放
 - 界面中英双语,跟随系统语言(英文系统自动显示英文)
 - 无充电控制、无风扇控制;唯一的网络请求是用户明确开启的测速
 
-## 安装与本地构建
+## 安装
 
-要求:Apple Silicon Mac · macOS 26.0+ · 构建需 Xcode 26.0+
+要求:Apple Silicon Mac · macOS 26.0+
+
+到 [Releases](https://github.com/wei666-china/MacPulse/releases) 下载最新的
+`MacPulse-*.zip`,解压后把 `MacPulse.app` 移入「应用程序」,**右键 → 打开**
+——ad-hoc 签名首次必须这样开,直接双击会被 Gatekeeper 拦下。
+
+下载完整性校验(每版 Release 页都附了 SHA-256):
+
+```sh
+shasum -a 256 MacPulse-3.0.0-beta.3.zip
+```
+
+首次启动会显示独立仪表盘窗口;关掉后 App 常驻菜单栏,点菜单栏图标弹出玻璃面板,
+再次双击 `MacPulse.app` 可重开独立窗口。
+
+## 本地构建
+
+额外要求:Xcode 26.0+
 
 ```sh
 ./build-app.sh release
@@ -39,9 +56,6 @@ MacPulse 是一款针对 Apple Silicon Mac 的原生菜单栏监控 App。充放
 
 产物在 `outputs/`:把 `MacPulse.app` 移入 `/Applications` 双击打开。本地构建使用
 ad-hoc 签名,不需要付费开发者账号。也可以直接在 Xcode 打开 `Package.swift`。
-
-首次启动会显示独立仪表盘窗口;关掉后 App 常驻菜单栏,点菜单栏图标弹出玻璃面板,
-再次双击 `MacPulse.app` 可重开独立窗口。
 
 ## 架构
 
@@ -57,7 +71,9 @@ ad-hoc 签名,不需要付费开发者账号。也可以直接在 Xcode 打开 `
 
 1. **绝不编数据** —— 读不到 = 「不可用」,机型不支持 = 「本机型不提供」,永不显示假 0
 2. **真值对账** —— 新读数必须配独立工具对拍测试(ioreg/df/iostat/vm_stat…),不许自己对自己
-3. **本地化门禁** —— 改动用户可见文案后跑 `python3 Tools/check-l10n.py`:key 覆盖、中英格式符、参数个数三查全过才能提交
+3. **出门检查** —— 推送前跑 `./Tools/preflight.sh`:本地化三查 + 编译 + 全量测试,
+   三项全过才能推。装了 pre-push 钩子(`git config core.hooksPath Tools/githooks`)
+   它会自己跑
 4. **设计规范** —— `docs/design-system.md` 三条铁律 + 复审清单,UI 改动逐条过
 
 ## 隐私
