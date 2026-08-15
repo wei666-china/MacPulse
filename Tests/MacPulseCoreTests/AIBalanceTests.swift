@@ -171,3 +171,34 @@ final class ClaudeSubscriptionParserTests: XCTestCase {
         XCTAssertNil(ClaudeSubscriptionParser.parse(data: Data("junk".utf8), now: now))
     }
 }
+
+/// Grok 计费响应解析。夹具是本机实测响应(2026-08-15,数值原样)。
+final class GrokQuotaParserTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func testRealMachineResponse() throws {
+        let json = #"""
+        {"config":{"currentPeriod":{"type":"TYPE_WEEKLY","start":"2026-08-12T03:42:01.381186+00:00","end":"2026-08-19T03:42:01.381186+00:00"},"creditUsagePercent":16.0,"onDemandCap":{"val":0},"onDemandUsed":{"val":0},"productUsage":[{"product":"GrokBuild","usagePercent":8.0},{"product":"GrokChat","usagePercent":8.0}],"isUnifiedBillingUser":true,"prepaidBalance":{"val":0}}}
+        """#
+        let quota = try XCTUnwrap(GrokQuotaParser.parse(data: Data(json.utf8), now: now))
+        XCTAssertEqual(quota.source, .grok)
+        XCTAssertEqual(quota.windows.count, 3, "总额度 + Build + Chat")
+        XCTAssertEqual(quota.windows[0].usedPercent, 16.0)
+        XCTAssertEqual(quota.windows[0].remainingPercent, 84.0, "主角是剩余")
+        XCTAssertNotNil(quota.windows[0].resetsAt, "带毫秒与时区偏移的时间戳要能解析")
+        XCTAssertEqual(quota.windows[1].label, "Grok Build(编码)")
+        XCTAssertEqual(quota.windows[2].remainingPercent, 92.0)
+    }
+
+    func testUnknownShapeYieldsNil() {
+        XCTAssertNil(GrokQuotaParser.parse(data: Data(#"{"error":"unauthorized"}"#.utf8), now: now))
+        XCTAssertNil(GrokQuotaParser.parse(data: Data("junk".utf8), now: now))
+    }
+
+    func testFlatShapeAlsoAccepted() throws {
+        // 端点若哪天把 config 拍平,不能整个失效。
+        let json = #"{"creditUsagePercent":40.0,"billingPeriodEnd":"2026-08-19T03:42:01Z"}"#
+        let quota = try XCTUnwrap(GrokQuotaParser.parse(data: Data(json.utf8), now: now))
+        XCTAssertEqual(quota.windows[0].remainingPercent, 60.0)
+    }
+}

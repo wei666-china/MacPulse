@@ -94,6 +94,9 @@ final class DashboardModel: ObservableObject {
     /// Claude 订阅额度(未文档化接口,设置里明确开启才请求)。
     @Published private(set) var claudeQuota: SubscriptionQuota?
     private let claudeSubscriptionReader = ClaudeSubscriptionReader()
+    private let grokQuotaReader = GrokQuotaReader()
+    /// Grok(xAI)订阅额度。复用 Grok CLI 登录态,默认关闭。
+    @Published private(set) var grokQuota: SubscriptionQuota?
     /// 被限流时距离可再试的秒数;界面据此显示「x 分钟后自动重试」。
     @Published private(set) var claudeQuotaRetryDelay: TimeInterval?
     private let aiBalanceService = AIBalanceService()
@@ -234,6 +237,7 @@ final class DashboardModel: ObservableObject {
         networkResult = networkHistory.last?.asResult()
         // 额度快照回填:接口限流/日志缺失时,界面至少有「上次读到的」可看。
         claudeQuota = QuotaSnapshotStore.load(.claude)
+        grokQuota = QuotaSnapshotStore.load(.grok)
         codexQuota = QuotaSnapshotStore.load(.codex)
         loadDrainProfile()
         backfillDrainProfileIfNeeded()
@@ -1199,6 +1203,10 @@ final class DashboardModel: ObservableObject {
             let codex = await Task.detached(priority: .utility) {
                 CodexQuotaReader.latestQuota()
             }.value
+            var grok: SubscriptionQuota?
+            if UserDefaults.standard.bool(forKey: "grokSubscriptionEnabled") {
+                grok = await self.grokQuotaReader.fetch()
+            }
             var claude: SubscriptionQuota?
             if UserDefaults.standard.bool(forKey: "claudeSubscriptionEnabled") {
                 claude = await self.claudeSubscriptionReader.fetch()
@@ -1219,6 +1227,10 @@ final class DashboardModel: ObservableObject {
             if let claude {
                 self.claudeQuota = claude
                 QuotaSnapshotStore.save(claude)
+            }
+            if let grok {
+                self.grokQuota = grok
+                QuotaSnapshotStore.save(grok)
             }
             self.aiBalanceRefreshedAt = .now
             self.aiBalanceRefreshInFlight = false

@@ -288,7 +288,9 @@ public struct QuotaWindow: Sendable, Equatable, Identifiable, Codable {
         self.resetsAt = resetsAt
     }
 
-    public var id: String { label }
+    /// ID 带上数值:同名窗口(如 Codex 的两个窗都是 10080 分钟)
+    /// 会撞 ID,SwiftUI 的 ForEach 遇到重复 ID 行为未定义。
+    public var id: String { "\(label)#\(usedPercent)" }
     public var remainingPercent: Double { max(0, 100 - usedPercent) }
 }
 
@@ -296,6 +298,7 @@ public struct SubscriptionQuota: Sendable, Equatable, Codable {
     public enum Source: String, Sendable, Codable {
         case claude
         case codex
+        case grok
     }
 
     public var source: Source
@@ -404,5 +407,56 @@ public enum ClaudeSubscriptionParser {
 
     private static func numeric(_ value: Any?) -> Double? {
         (value as? NSNumber)?.doubleValue
+    }
+}
+
+/// Grok(xAI)订阅额度解析。数据来自 Grok CLI 自己的计费端点,
+/// 用的是 CLI 已有的登录态——与 CodexBar / openusage 同一条路,
+/// 不碰浏览器 cookie(grok.com 的 gRPC-web 路已被 WKE keypair 挡死,
+/// 且那属于逆向,本项目不做)。
+/// 实测响应(2026-08-15):{"config":{"creditUsagePercent":16.0,
+///   "currentPeriod":{"end":"…"},"productUsage":[{"product":"GrokBuild",
+///   "usagePercent":8.0},…],"onDemandCap":{"val":0},"prepaidBalance":{"val":0}}}
+public enum GrokQuotaParser {
+
+    public static func parse(data: Data, now: Date) -> SubscriptionQuota? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let config = (root["config"] as? [String: Any]) ?? root
+        guard let used = (config["creditUsagePercent"] as? NSNumber)?.doubleValue else { return nil }
+
+        let resets = (config["currentPeriod"] as? [String: Any])?["end"] as? String
+            ?? config["billingPeriodEnd"] as? String
+        let resetDate = resets.flatMap {
+            ISO8601DateFormatter.sharedFractional.date(from: $0)
+                ?? ISO8601DateFormatter.shared.date(from: $0)
+        }
+
+        var windows = [QuotaWindow(
+            label: String(localized: "每周额度"),
+            usedPercent: used,
+            resetsAt: resetDate
+        )]
+        // 分产品用量(Grok Build / Grok Chat 各自占比),有就列出来。
+        if let products = config["productUsage"] as? [[String: Any]] {
+            for product in products {
+                guard let name = product["product"] as? String,
+                      let percent = (product["usagePercent"] as? NSNumber)?.doubleValue
+                else { continue }
+                windows.append(QuotaWindow(
+                    label: displayName(for: name),
+                    usedPercent: percent,
+                    resetsAt: resetDate
+                ))
+            }
+        }
+        return SubscriptionQuota(source: .grok, windows: windows, planType: nil, fetchedAt: now)
+    }
+
+    static func displayName(for product: String) -> String {
+        switch product {
+        case "GrokBuild": String(localized: "Grok Build(编码)")
+        case "GrokChat": String(localized: "Grok Chat(对话)")
+        default: product
+        }
     }
 }

@@ -6,6 +6,7 @@ import SwiftUI
 struct AIView: View {
     @EnvironmentObject private var model: DashboardModel
     @AppStorage("claudeSubscriptionEnabled") private var claudeSubscriptionEnabled = false
+    @AppStorage("grokSubscriptionEnabled") private var grokSubscriptionEnabled = false
 
     var body: some View {
         ScrollView {
@@ -83,6 +84,40 @@ struct AIView: View {
                 } ?? String(localized: "读本机会话日志,零网络"),
                 quota: codex
             )
+        }
+        grokSection
+    }
+
+    /// Grok(xAI):复用本机 Grok CLI 的登录态查每周额度。
+    @ViewBuilder
+    private var grokSection: some View {
+        if let grok = model.grokQuota {
+            quotaCard(
+                title: String(localized: "Grok 订阅"),
+                subtitle: String(localized: "复用本机 Grok CLI 登录态·官方计费端点"),
+                quota: grok
+            )
+        } else if GrokQuotaReader.isAvailable, !grokSubscriptionEnabled {
+            LiquidCard(padding: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "person.badge.key")
+                        .foregroundStyle(MacPulseTheme.ink)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(localized: "Grok 订阅额度"))
+                            .font(.callout.weight(.semibold))
+                        Text(String(localized: "本机装了 Grok CLI 且已登录。开启后用它的登录态查每周额度(Build 与 Chat 分开列),不碰浏览器 cookie。"))
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    Toggle("", isOn: $grokSubscriptionEnabled)
+                        .labelsHidden()
+                        .onChange(of: grokSubscriptionEnabled) { _, on in
+                            if on { model.refreshAIBalances(force: true) }
+                        }
+                }
+            }
         }
     }
 

@@ -127,3 +127,57 @@ actor ClaudeSubscriptionReader {
         return ClaudeSubscriptionParser.parse(data: data, now: .now)
     }
 }
+
+/// Grok 订阅额度:复用 Grok CLI 已有的登录态(~/.grok/auth.json),
+/// 调它自己的计费端点。不碰浏览器 cookie。默认关闭,设置里开启才请求。
+actor GrokQuotaReader {
+    private let session: URLSession
+    private var retryAfter: Date?
+
+    init() {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 12
+        session = URLSession(configuration: config)
+    }
+
+    /// CLI 的凭证文件:按 scope 分组,取第一条带 key 的。
+    /// token 只在内存中转手,不落盘不打印不进报告。
+    static func loadToken(
+        path: URL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".grok/auth.json")
+    ) -> String? {
+        guard let data = try? Data(contentsOf: path),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        for value in root.values {
+            if let entry = value as? [String: Any],
+               let key = entry["key"] as? String, !key.isEmpty {
+                return key
+            }
+        }
+        return nil
+    }
+
+    static var isAvailable: Bool { loadToken() != nil }
+
+    func fetch() async -> SubscriptionQuota? {
+        if let retryAfter, retryAfter > Date() { return nil }
+        guard let token = Self.loadToken() else { return nil }
+        var request = URLRequest(
+            url: URL(string: "https://cli-chat-proxy.grok.com/v1/billing?format=credits")!
+        )
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("xai-grok-cli", forHTTPHeaderField: "x-xai-token-auth")
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse
+        else { return nil }
+        if http.statusCode == 429 {
+            let seconds = (http.value(forHTTPHeaderField: "retry-after").flatMap(Double.init)) ?? 900
+            retryAfter = Date().addingTimeInterval(seconds + 30)
+            return nil
+        }
+        guard http.statusCode == 200 else { return nil }
+        retryAfter = nil
+        return GrokQuotaParser.parse(data: data, now: .now)
+    }
+}

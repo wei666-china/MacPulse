@@ -781,3 +781,12 @@
 "接口正在限流,%@ 分钟后自动重试。这个接口每小时只允许很少几次查询。" = "The endpoint is rate-limited; retrying automatically in %@ min. It only allows a few queries per hour.";
 "本机没找到 Claude Code 的登录态。装好并登录 Claude Code 后即可读取。" = "No Claude Code login found on this Mac. Install and sign in to Claude Code to read the quota.";
 "正在读取,下一轮刷新后显示。" = "Reading; it will appear after the next refresh.";
+
+/* Grok quota */
+"每周额度" = "Weekly credits";
+"Grok Build(编码)" = "Grok Build (coding)";
+"Grok Chat(对话)" = "Grok Chat";
+"Grok 订阅" = "Grok subscription";
+"Grok 订阅额度" = "Grok subscription quota";
+"复用本机 Grok CLI 登录态·官方计费端点" = "Uses this Mac's Grok CLI login · official billing endpoint";
+"本机装了 Grok CLI 且已登录。开启后用它的登录态查每周额度(Build 与 Chat 分开列),不碰浏览器 cookie。" = "Grok CLI is installed and signed in on this Mac. Turn this on to read weekly credits (Build and Chat listed separately) using its login — no browser cookies involved.";
