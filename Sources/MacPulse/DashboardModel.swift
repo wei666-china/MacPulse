@@ -625,7 +625,20 @@ final class DashboardModel: ObservableObject {
             return current.deep.systemPowerWatts.map { String(format: "%.1f W", $0) }
         case .memoryPercent:
             return memory?.usedFraction.map { String(format: String(localized: "内存 %.0f%%"), $0 * 100) }
+        case .aiQuota:
+            // 三家订阅里最紧张的那条。读不到就整段不显示(compactMap 会滤掉),
+            // 不编一个 100%。
+            return tightestQuotaRemaining().map { String(format: "AI %.0f%%", $0) }
         }
+    }
+
+    /// 三家订阅里剩得最少的那条,给菜单栏用。
+    func tightestQuotaRemaining() -> Double? {
+        [claudeQuota, codexQuota, grokQuota]
+            .compactMap { $0 }
+            .flatMap(\.windows)
+            .map(\.remainingPercent)
+            .min()
     }
 
     var menuBarAccessibilityLabel: String {
@@ -1234,6 +1247,10 @@ final class DashboardModel: ObservableObject {
             }
             self.aiBalanceRefreshedAt = .now
             self.aiBalanceRefreshInFlight = false
+            // 额度快用完了要主动说——重度用户等发现时通常已经断供了。
+            self.notifications.evaluateQuotas(
+                [self.claudeQuota, self.codexQuota, self.grokQuota].compactMap { $0 }
+            )
         }
     }
 

@@ -68,8 +68,17 @@ actor ClaudeSubscriptionReader {
         session = URLSession(configuration: config)
     }
 
-    static func loadToken() -> String? {
-        // 钥匙串优先(Claude Code 正式存放处),文件兜底。
+    /// 取 token 的结果。「被钥匙串拒绝」必须与「没登录」分开——
+    /// 前者是一次授权就能解决的,后者要装 Claude Code,给用户的话完全不同。
+    enum TokenState {
+        case token(String)
+        /// 钥匙串里有,但本 App 没被授权读(系统会弹一次授权框)。
+        case keychainDenied
+        /// 本机压根没有 Claude Code 的登录态。
+        case missing
+    }
+
+    static func tokenState() -> TokenState {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "Claude Code-credentials",
@@ -77,15 +86,28 @@ actor ClaudeSubscriptionReader {
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var item: CFTypeRef?
-        if SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-           let data = item as? Data,
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecSuccess, let data = item as? Data,
            let token = Self.extractToken(from: data) {
-            return token
+            return .token(token)
         }
+        // 文件兜底(部分安装形态把凭证放文件里)。
         let url = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/.credentials.json")
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return Self.extractToken(from: data)
+        if let data = try? Data(contentsOf: url), let token = Self.extractToken(from: data) {
+            return .token(token)
+        }
+        // 条目存在但读不了(用户点了拒绝、或尚未授权):不是「没登录」。
+        if status == errSecInteractionNotAllowed || status == errSecAuthFailed
+            || status == errSecUserCanceled {
+            return .keychainDenied
+        }
+        return .missing
+    }
+
+    static func loadToken() -> String? {
+        if case .token(let token) = tokenState() { return token }
+        return nil
     }
 
     private static func extractToken(from data: Data) -> String? {

@@ -410,6 +410,45 @@ public enum ClaudeSubscriptionParser {
     }
 }
 
+/// 额度告警判定。低额度是持续态不是事件——同一个「来源+窗口」在同一个
+/// 计费周期内只提醒一次,否则每次刷新都响,等于没有提醒。
+public enum QuotaAlertPolicy {
+    /// 剩余低于这个数才提醒。15% 的依据:一周额度剩 15% 约等于一天用量,
+    /// 还来得及调整节奏;再低就只能干等重置了。
+    public static let remainingThreshold: Double = 15
+
+    public struct Alert: Sendable, Equatable {
+        public let source: SubscriptionQuota.Source
+        public let label: String
+        public let remainingPercent: Double
+        /// 去重键:同一周期内同一个窗口只提醒一次。
+        public let dedupeKey: String
+    }
+
+    public static func due(
+        quotas: [SubscriptionQuota],
+        alreadySent: Set<String>,
+        threshold: Double = remainingThreshold
+    ) -> [Alert] {
+        var alerts: [Alert] = []
+        for quota in quotas {
+            for window in quota.windows where window.remainingPercent < threshold {
+                // 周期标识用重置时刻:重置后 key 变化,下个周期可以再提醒。
+                let period = window.resetsAt.map { String(Int($0.timeIntervalSince1970)) } ?? "none"
+                let key = "\(quota.source.rawValue)|\(window.label)|\(period)"
+                guard !alreadySent.contains(key) else { continue }
+                alerts.append(Alert(
+                    source: quota.source,
+                    label: window.label,
+                    remainingPercent: window.remainingPercent,
+                    dedupeKey: key
+                ))
+            }
+        }
+        return alerts
+    }
+}
+
 /// Grok(xAI)订阅额度解析。数据来自 Grok CLI 自己的计费端点,
 /// 用的是 CLI 已有的登录态——与 CodexBar / openusage 同一条路,
 /// 不碰浏览器 cookie(grok.com 的 gRPC-web 路已被 WKE keypair 挡死,

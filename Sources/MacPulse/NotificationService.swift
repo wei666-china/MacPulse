@@ -117,6 +117,50 @@ final class NotificationService {
         )
     }
 
+    /// 额度告警。低额度是持续态,按「来源+窗口+计费周期」去重,
+    /// 一个周期内只响一次;重置后自然可以再响。
+    private var quotaAlertsSent: Set<String> = {
+        Set(UserDefaults.standard.stringArray(forKey: "quotaAlertsSent") ?? [])
+    }()
+
+    func evaluateQuotas(_ quotas: [SubscriptionQuota]) {
+        let defaults = UserDefaults.standard
+        guard
+            defaults.object(forKey: "notificationsEnabled") as? Bool ?? true,
+            defaults.object(forKey: "quotaAlertsEnabled") as? Bool ?? true,
+            authorizationStatus == .authorized || authorizationStatus == .provisional
+        else { return }
+
+        let due = QuotaAlertPolicy.due(quotas: quotas, alreadySent: quotaAlertsSent)
+        guard !due.isEmpty else { return }
+        for alert in due {
+            quotaAlertsSent.insert(alert.dedupeKey)
+            let content = UNMutableNotificationContent()
+            content.title = String(localized: "AI 额度快用完了")
+            content.body = String(
+                format: String(localized: "%@ 的%@只剩 %@%%。"),
+                sourceName(alert.source), alert.label,
+                String(describing: Int(alert.remainingPercent))
+            )
+            content.sound = .default
+            center.add(UNNotificationRequest(
+                identifier: "quota.\(alert.dedupeKey)",
+                content: content,
+                trigger: nil
+            ))
+        }
+        // 只留最近 40 条去重键,避免无限增长。
+        defaults.set(Array(quotaAlertsSent.suffix(40)), forKey: "quotaAlertsSent")
+    }
+
+    private func sourceName(_ source: SubscriptionQuota.Source) -> String {
+        switch source {
+        case .claude: "Claude"
+        case .codex: "Codex"
+        case .grok: "Grok"
+        }
+    }
+
     private func send(_ alert: String, snapshot: MetricSnapshot) {
         let content = UNMutableNotificationContent()
         content.sound = .default

@@ -8,6 +8,7 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
     case batteryPercent
     case socPower
     case memoryPercent
+    case aiQuota
 
     var id: String { rawValue }
 
@@ -18,6 +19,7 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
         case .batteryPercent: String(localized: "电量百分比")
         case .socPower: String(localized: "SoC 总功耗")
         case .memoryPercent: String(localized: "内存占用")
+        case .aiQuota: String(localized: "AI 额度")
         }
     }
 

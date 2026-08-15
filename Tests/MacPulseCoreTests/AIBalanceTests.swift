@@ -202,3 +202,50 @@ final class GrokQuotaParserTests: XCTestCase {
         XCTAssertEqual(quota.windows[0].remainingPercent, 60.0)
     }
 }
+
+/// 额度告警判定:阈值、周期内去重、重置后可再报。
+final class QuotaAlertPolicyTests: XCTestCase {
+    private let reset = Date(timeIntervalSince1970: 1_800_100_000)
+
+    private func quota(_ source: SubscriptionQuota.Source, used: Double, label: String = "每周") -> SubscriptionQuota {
+        .init(source: source,
+              windows: [.init(label: label, usedPercent: used, resetsAt: reset)],
+              fetchedAt: Date(timeIntervalSince1970: 1_800_000_000))
+    }
+
+    func testFiresOnlyBelowThreshold() {
+        let due = QuotaAlertPolicy.due(
+            quotas: [quota(.codex, used: 90), quota(.grok, used: 50)],
+            alreadySent: []
+        )
+        XCTAssertEqual(due.count, 1, "剩 10% 该报,剩 50% 不该")
+        XCTAssertEqual(due.first?.source, .codex)
+        XCTAssertEqual(due.first?.remainingPercent, 10)
+    }
+
+    func testDedupeWithinSamePeriod() {
+        let alerts = QuotaAlertPolicy.due(quotas: [quota(.codex, used: 92)], alreadySent: [])
+        let key = try! XCTUnwrap(alerts.first).dedupeKey
+        let again = QuotaAlertPolicy.due(quotas: [quota(.codex, used: 95)], alreadySent: [key])
+        XCTAssertTrue(again.isEmpty, "同一周期内只提醒一次,否则每次刷新都响")
+    }
+
+    func testNewPeriodAlertsAgain() {
+        let first = QuotaAlertPolicy.due(quotas: [quota(.codex, used: 92)], alreadySent: [])
+        let key = try! XCTUnwrap(first.first).dedupeKey
+        // 重置时刻变了 = 新周期,可以再报。
+        let nextPeriod = SubscriptionQuota(
+            source: .codex,
+            windows: [.init(label: "每周", usedPercent: 92, resetsAt: reset.addingTimeInterval(604_800))],
+            fetchedAt: Date()
+        )
+        let due = QuotaAlertPolicy.due(quotas: [nextPeriod], alreadySent: [key])
+        XCTAssertEqual(due.count, 1)
+    }
+
+    func testBoundaryAtThreshold() {
+        // 恰好 15% 不报(阈值是「低于」),14.9% 报。
+        XCTAssertTrue(QuotaAlertPolicy.due(quotas: [quota(.grok, used: 85)], alreadySent: []).isEmpty)
+        XCTAssertEqual(QuotaAlertPolicy.due(quotas: [quota(.grok, used: 85.1)], alreadySent: []).count, 1)
+    }
+}

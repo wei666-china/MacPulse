@@ -790,3 +790,11 @@
 "Grok 订阅额度" = "Grok subscription quota";
 "复用本机 Grok CLI 登录态·官方计费端点" = "Uses this Mac's Grok CLI login · official billing endpoint";
 "本机装了 Grok CLI 且已登录。开启后用它的登录态查每周额度(Build 与 Chat 分开列),不碰浏览器 cookie。" = "Grok CLI is installed and signed in on this Mac. Turn this on to read weekly credits (Build and Chat listed separately) using its login — no browser cookies involved.";
+"需要授权 MacPulse 读取 Claude Code 的钥匙串条目——首次刷新时系统会弹一次对话框,选「始终允许」即可长期生效。" = "MacPulse needs permission to read Claude Code's Keychain item — the system asks once on first refresh; choose “Always Allow” and it stays granted.";
+
+/* Quota alerts */
+"AI 额度快用完了" = "AI quota running low";
+"%@ 的%@只剩 %@%%。" = "%@ %@ is down to %@%%.";
+"AI 额度提醒" = "AI quota alerts";
+"订阅额度剩余低于 15% 时提醒;同一计费周期只提醒一次" = "Alert when a subscription quota drops below 15% remaining; once per billing period";
+"AI 额度" = "AI quota";

@@ -1377,6 +1377,7 @@ struct SettingsView: View {
     @AppStorage("thermalAlertsEnabled") private var thermalAlertsEnabled = true
     @AppStorage("healthAlertsEnabled") private var healthAlertsEnabled = true
     @AppStorage("peripheralAlertsEnabled") private var peripheralAlertsEnabled = true
+    @AppStorage("quotaAlertsEnabled") private var quotaAlertsEnabled = true
     @AppStorage("peripheralAlertThreshold") private var peripheralAlertThreshold = 20
     @AppStorage("alertCooldownMinutes") private var alertCooldownMinutes = 60.0
     @AppStorage("menuBarDisplayMode") private var menuBarDisplayMode = MenuBarDisplayMode.standard.rawValue
@@ -1523,6 +1524,13 @@ struct SettingsView: View {
                         Toggle(String(localized: "电池持续高温"), isOn: $temperatureAlertsEnabled)
                         Toggle(String(localized: "系统热压力"), isOn: $thermalAlertsEnabled)
                         Toggle(String(localized: "电池健康度低于 80%"), isOn: $healthAlertsEnabled)
+                        Toggle(isOn: $quotaAlertsEnabled) {
+                            settingLabel(
+                                String(localized: "AI 额度提醒"),
+                                String(localized: "订阅额度剩余低于 15% 时提醒;同一计费周期只提醒一次"),
+                                "brain"
+                            )
+                        }
                         Toggle(isOn: $peripheralAlertsEnabled) {
                             settingLabel(
                                 String(localized: "外设电量提醒"),

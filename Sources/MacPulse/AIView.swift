@@ -129,10 +129,14 @@ struct AIView: View {
                 String(describing: max(1, Int(delay / 60)))
             )
         }
-        if ClaudeSubscriptionReader.loadToken() == nil {
+        switch ClaudeSubscriptionReader.tokenState() {
+        case .keychainDenied:
+            return String(localized: "需要授权 MacPulse 读取 Claude Code 的钥匙串条目——首次刷新时系统会弹一次对话框,选「始终允许」即可长期生效。")
+        case .missing:
             return String(localized: "本机没找到 Claude Code 的登录态。装好并登录 Claude Code 后即可读取。")
+        case .token:
+            return String(localized: "正在读取,下一轮刷新后显示。")
         }
-        return String(localized: "正在读取,下一轮刷新后显示。")
     }
 
     private func quotaCard(title: String, subtitle: String, quota: SubscriptionQuota) -> some View {
