@@ -806,3 +806,5 @@
 "剩余" = "Remaining";
 "来源" = "Source";
 "纵轴是剩余百分比;每小时最多记一个点,不足三点时不画。" = "The vertical axis is percent remaining; at most one sample per hour, and the chart needs at least three.";
+"已过期,仅供参考" = "stale — for reference only";
+"%@ 天前" = "%@ days ago";

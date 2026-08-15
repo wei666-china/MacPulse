@@ -294,6 +294,26 @@ public struct QuotaWindow: Sendable, Equatable, Identifiable, Codable {
     public var remainingPercent: Double { max(0, 100 - usedPercent) }
 }
 
+/// 额度快照的时效规矩。本项目在测速那条路上早就定好了这套做法
+/// (阈值 + 置灰 + 天级文案),额度这条当初漏了,评审抓出来:
+/// 卸载 Codex 一周后卡片仍加粗显示「剩 70%」,把读不到伪装成读到了。
+public enum QuotaFreshness {
+    /// 超过 6 小时就算过期(与测速同一个数)。额度是慢变量,但「慢」
+    /// 不等于「可以拿三个月前的数当现在」。
+    public static let staleThreshold: TimeInterval = 6 * 3600
+    /// 超过这个岁数干脆不展示:再老的快照连参考价值都没有,
+    /// 还会喂给告警造成为已消失的订阅推送。
+    public static let discardThreshold: TimeInterval = 72 * 3600
+
+    public static func isStale(_ fetchedAt: Date, now: Date = .now) -> Bool {
+        now.timeIntervalSince(fetchedAt) > staleThreshold
+    }
+
+    public static func shouldDiscard(_ fetchedAt: Date, now: Date = .now) -> Bool {
+        now.timeIntervalSince(fetchedAt) > discardThreshold
+    }
+}
+
 public struct SubscriptionQuota: Sendable, Equatable, Codable {
     public enum Source: String, Sendable, Codable {
         case claude
@@ -428,11 +448,17 @@ public enum QuotaAlertPolicy {
     public static func due(
         quotas: [SubscriptionQuota],
         alreadySent: Set<String>,
-        threshold: Double = remainingThreshold
+        threshold: Double = remainingThreshold,
+        now: Date = .now
     ) -> [Alert] {
         var alerts: [Alert] = []
         for quota in quotas {
+            // 过期快照不许触发告警——为一个可能早已不存在的订阅推送
+            // 「快用完了」,比不提醒更坏。
+            guard !QuotaFreshness.isStale(quota.fetchedAt, now: now) else { continue }
             for window in quota.windows where window.remainingPercent < threshold {
+                // 重置时刻已过 = 这条数据描述的是上一个周期,早该归零了。
+                if let resets = window.resetsAt, resets <= now { continue }
                 // 周期标识用重置时刻:重置后 key 变化,下个周期可以再提醒。
                 let period = window.resetsAt.map { String(Int($0.timeIntervalSince1970)) } ?? "none"
                 let key = "\(quota.source.rawValue)|\(window.label)|\(period)"

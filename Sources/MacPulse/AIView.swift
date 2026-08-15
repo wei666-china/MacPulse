@@ -127,7 +127,7 @@ struct AIView: View {
                 subtitle: String(localized: "复用本机 Grok CLI 登录态·官方计费端点"),
                 quota: grok
             )
-        } else if GrokQuotaReader.isAvailable, !grokSubscriptionEnabled {
+        } else if !grokSubscriptionEnabled, model.grokCLIAvailable {
             LiquidCard(padding: 12) {
                 HStack(spacing: 8) {
                     Image(systemName: "person.badge.key")
@@ -201,11 +201,21 @@ struct AIView: View {
                         .frame(height: 5)
                     }
                 }
-                Text(String(format: String(localized: "快照时间:%@"), quotaAge(quota.fetchedAt)))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 6) {
+                    Text(String(format: String(localized: "快照时间:%@"), quotaAge(quota.fetchedAt)))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    if QuotaFreshness.isStale(quota.fetchedAt) {
+                        Text(String(localized: "已过期,仅供参考"))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(MacPulseTheme.warm)
+                    }
+                }
             }
         }
+        // 过期快照整卡降透明度:数字仍可读(旧数据是诚实数据),
+        // 但视觉上明确降级——与测速页过期结果同一套做法。
+        .opacity(QuotaFreshness.isStale(quota.fetchedAt) ? 0.55 : 1)
     }
 
     private func resetText(_ date: Date) -> String {
@@ -226,7 +236,10 @@ struct AIView: View {
         let seconds = max(0, Date().timeIntervalSince(date))
         if seconds < 90 { return String(localized: "刚刚") }
         if seconds < 3_600 { return String(format: String(localized: "%@ 分钟前"), String(describing: Int(seconds / 60))) }
-        return String(format: String(localized: "%@ 小时前"), String(describing: Int(seconds / 3_600)))
+        if seconds < 86_400 { return String(format: String(localized: "%@ 小时前"), String(describing: Int(seconds / 3_600))) }
+        // 没有天级降级就会出现「2000 小时前」——数字大到没人换算,
+        // 等于把三个月前的数据当现值给人看(评审原话)。
+        return String(format: String(localized: "%@ 天前"), String(describing: Int(seconds / 86_400)))
     }
 
     // MARK: - API 余额

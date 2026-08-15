@@ -236,9 +236,11 @@ final class DashboardModel: ObservableObject {
         // 启动回填:最近一条历史当作当前结果展示(带时效标注,过期会置灰)。
         networkResult = networkHistory.last?.asResult()
         // 额度快照回填:接口限流/日志缺失时,界面至少有「上次读到的」可看。
-        claudeQuota = QuotaSnapshotStore.load(.claude)
-        grokQuota = QuotaSnapshotStore.load(.grok)
-        codexQuota = QuotaSnapshotStore.load(.codex)
+        // 回填有时效门:太老的快照直接丢弃,不让它冒充现值
+        // (评审 P0:卸载 Codex 一周后卡片仍加粗显示旧百分比)。
+        claudeQuota = Self.freshOrNil(QuotaSnapshotStore.load(.claude))
+        grokQuota = Self.freshOrNil(QuotaSnapshotStore.load(.grok))
+        codexQuota = Self.freshOrNil(QuotaSnapshotStore.load(.codex))
         loadDrainProfile()
         backfillDrainProfileIfNeeded()
         estimateAccuracy = sessionTracker.accuracy()
@@ -632,10 +634,19 @@ final class DashboardModel: ObservableObject {
         }
     }
 
+    /// 太老的快照一律丢弃(≥72 小时)。
+    static func freshOrNil(_ quota: SubscriptionQuota?) -> SubscriptionQuota? {
+        guard let quota, !QuotaFreshness.shouldDiscard(quota.fetchedAt) else { return nil }
+        return quota
+    }
+
     /// 三家订阅里剩得最少的那条,给菜单栏用。
+    /// **过期的不算**:菜单栏那一格没有地方标注快照时间,拿旧数字顶上
+    /// 等于无申辩余地地撒谎(评审原话)。
     func tightestQuotaRemaining() -> Double? {
         [claudeQuota, codexQuota, grokQuota]
             .compactMap { $0 }
+            .filter { !QuotaFreshness.isStale($0.fetchedAt) }
             .flatMap(\.windows)
             .map(\.remainingPercent)
             .min()
@@ -1195,6 +1206,10 @@ final class DashboardModel: ObservableObject {
     /// Claude 登录态。同样后台查一次并缓存,视图只读缓存——
     /// 在 body 里同步读钥匙串等于每次重绘都可能弹框+阻塞。
     @Published private(set) var claudeTokenState: ClaudeSubscriptionReader.TokenState = .missing
+    /// 本机是否装了并登录了 Grok CLI。同样后台探一次并缓存——
+    /// 评审抓获:视图 body 里直接调 isAvailable 等于每次重绘读一次
+    /// ~/.grok/auth.json,窗口打开时约每秒一次。
+    @Published private(set) var grokCLIAvailable = false
 
     /// 用户点「去授权」才走这条:后台发起一次钥匙串读取,系统会弹一次
     /// 授权框。不在后台偷偷弹——那样用户会莫名其妙看到一个要密码的框。
@@ -1211,7 +1226,11 @@ final class DashboardModel: ObservableObject {
     func refreshClaudeTokenState() {
         Task.detached(priority: .utility) {
             let state = ClaudeSubscriptionReader.tokenState()
-            await MainActor.run { self.claudeTokenState = state }
+            let grokReady = GrokQuotaReader.isAvailable
+            await MainActor.run {
+                self.claudeTokenState = state
+                self.grokCLIAvailable = grokReady
+            }
         }
     }
 

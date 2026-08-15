@@ -249,3 +249,49 @@ final class QuotaAlertPolicyTests: XCTestCase {
         XCTAssertEqual(QuotaAlertPolicy.due(quotas: [quota(.grok, used: 85.1)], alreadySent: []).count, 1)
     }
 }
+
+/// 额度快照的时效门。这套规矩在测速那条路上早就有(阈值+置灰+天级文案),
+/// 额度当初漏了,四视角评审抓出来:卸载 Codex 一周后卡片仍加粗显示旧值。
+final class QuotaFreshnessTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func testStaleAfterSixHours() {
+        XCTAssertFalse(QuotaFreshness.isStale(now.addingTimeInterval(-5 * 3600), now: now))
+        XCTAssertTrue(QuotaFreshness.isStale(now.addingTimeInterval(-7 * 3600), now: now))
+    }
+
+    func testDiscardAfterThreeDays() {
+        XCTAssertFalse(QuotaFreshness.shouldDiscard(now.addingTimeInterval(-48 * 3600), now: now))
+        XCTAssertTrue(QuotaFreshness.shouldDiscard(now.addingTimeInterval(-80 * 3600), now: now))
+    }
+
+    /// 过期快照不许触发告警——为一个可能早已不存在的订阅推送
+    /// 「快用完了」,比不提醒更坏。
+    func testStaleQuotaNeverAlerts() {
+        let stale = SubscriptionQuota(
+            source: .codex,
+            windows: [.init(label: "每周", usedPercent: 95, resetsAt: now.addingTimeInterval(86_400))],
+            fetchedAt: now.addingTimeInterval(-20 * 3600)
+        )
+        XCTAssertTrue(QuotaAlertPolicy.due(quotas: [stale], alreadySent: [], now: now).isEmpty)
+    }
+
+    /// 重置时刻已过的窗口描述的是上一个周期,同样不许告警。
+    func testExpiredWindowNeverAlerts() {
+        let expired = SubscriptionQuota(
+            source: .grok,
+            windows: [.init(label: "每周", usedPercent: 95, resetsAt: now.addingTimeInterval(-3600))],
+            fetchedAt: now.addingTimeInterval(-600)
+        )
+        XCTAssertTrue(QuotaAlertPolicy.due(quotas: [expired], alreadySent: [], now: now).isEmpty)
+    }
+
+    func testFreshQuotaStillAlerts() {
+        let fresh = SubscriptionQuota(
+            source: .claude,
+            windows: [.init(label: "每周", usedPercent: 95, resetsAt: now.addingTimeInterval(86_400))],
+            fetchedAt: now.addingTimeInterval(-300)
+        )
+        XCTAssertEqual(QuotaAlertPolicy.due(quotas: [fresh], alreadySent: [], now: now).count, 1)
+    }
+}
