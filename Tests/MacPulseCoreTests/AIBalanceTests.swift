@@ -120,3 +120,54 @@ final class ClaudeCodeUsageParserTests: XCTestCase {
         XCTAssertEqual(usage.inputTokens, 10, "带毫秒的时间戳也要认(真实日志两种都有)")
     }
 }
+
+/// Codex 本地日志的 rate_limits 快照解析。
+/// 夹具是本机实测行(2026-08-15,数值原样),这是真值锚。
+final class CodexRateLimitParserTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func testRealMachineSnapshot() throws {
+        let line = #"{"timestamp":"2026-08-15T18:04:20Z","type":"event","payload":{"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":30.0,"window_minutes":10080,"resets_at":1787385898},"secondary":null,"credits":{"has_credits":false,"unlimited":false,"balance":"0"},"individual_limit":null,"spend_control_reached":null,"plan_type":"plus","rate_limit_reached_type":null}}}"#
+        let quota = try XCTUnwrap(CodexRateLimitParser.parse(line: line, now: now))
+        XCTAssertEqual(quota.source, .codex)
+        XCTAssertEqual(quota.planType, "plus")
+        XCTAssertEqual(quota.windows.count, 1)
+        XCTAssertEqual(quota.windows[0].usedPercent, 30.0)
+        XCTAssertEqual(quota.windows[0].remainingPercent, 70.0, "主角是剩余")
+        XCTAssertEqual(quota.windows[0].label, "每周", "10080 分钟 = 每周")
+        XCTAssertEqual(quota.windows[0].resetsAt, Date(timeIntervalSince1970: 1_787_385_898))
+    }
+
+    func testNonRateLimitLinesIgnored() {
+        XCTAssertNil(CodexRateLimitParser.parse(line: #"{"type":"message","text":"hi"}"#, now: now))
+        XCTAssertNil(CodexRateLimitParser.parse(line: "garbage", now: now))
+    }
+
+    func testPrimaryAndSecondaryWindows() throws {
+        let line = #"{"rate_limits":{"primary":{"used_percent":39.0,"window_minutes":300,"resets_at":1787300000},"secondary":{"used_percent":74.0,"window_minutes":10080,"resets_at":1787385898},"plan_type":"pro"}}"#
+        let quota = try XCTUnwrap(CodexRateLimitParser.parse(line: line, now: now))
+        XCTAssertEqual(quota.windows.count, 2)
+        XCTAssertEqual(quota.windows[0].label, "5 小时窗")
+        XCTAssertEqual(quota.windows[1].remainingPercent, 26.0)
+    }
+}
+
+/// Claude 订阅用量响应解析(未文档化接口,形状按社区文档,键名多候选防漂移)。
+final class ClaudeSubscriptionParserTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func testCommunityDocumentedShape() throws {
+        let json = #"{"five_hour":{"utilization":39,"resets_at":"2026-08-15T12:00:00Z"},"seven_day":{"utilization":74,"resets_at":"2026-08-16T09:00:00Z"},"seven_day_opus":{"utilization":93,"resets_at":"2026-08-16T09:00:00Z"}}"#
+        let quota = try XCTUnwrap(ClaudeSubscriptionParser.parse(data: Data(json.utf8), now: now))
+        XCTAssertEqual(quota.windows.count, 3)
+        XCTAssertEqual(quota.windows[0].usedPercent, 39)
+        XCTAssertEqual(quota.windows[1].remainingPercent, 26)
+        XCTAssertEqual(quota.windows[2].remainingPercent, 7)
+    }
+
+    func testUnknownShapeYieldsNilNotZeros() {
+        XCTAssertNil(ClaudeSubscriptionParser.parse(data: Data(#"{"whatever":1}"#.utf8), now: now),
+                     "形状对不上就 nil,绝不编 0%")
+        XCTAssertNil(ClaudeSubscriptionParser.parse(data: Data("junk".utf8), now: now))
+    }
+}

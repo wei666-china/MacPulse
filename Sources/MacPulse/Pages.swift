@@ -136,17 +136,10 @@ struct OverviewView: View {
     @ViewBuilder
     private var aiBalanceCard: some View {
         if model.aiBalances.isEmpty, model.aiBalanceErrors.isEmpty, model.claudeCodeUsage == nil {
-            LiquidCard(padding: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "brain")
-                        .foregroundStyle(MacPulseTheme.ink)
-                    Text(String(localized: "AI 余额:在设置页添加服务商 API key 后,这里显示各家余额"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                }
-            }
+            // 体验走查(R2)裁定:没配 key 也没本地用量的用户,常驻一行
+            // 引导就是占屏噪音——空态直接消失,发现入口在设置页与主页
+            // 卡片清单(那里的「AI 余额」开关自带说明)。
+            EmptyView()
         } else {
             LiquidCard {
                 VStack(alignment: .leading, spacing: 10) {
@@ -227,14 +220,7 @@ struct OverviewView: View {
         return String(format: String(localized: "%@ 分钟前更新"), String(describing: Int(seconds / 60)))
     }
 
-    /// token 数的人话格式:1.2M / 340K / 950。
-    private func tokenText(_ count: Int) -> String {
-        switch count {
-        case 1_000_000...: String(format: "%.1fM", Double(count) / 1_000_000)
-        case 1_000...: String(format: "%.0fK", Double(count) / 1_000)
-        default: String(describing: count)
-        }
-    }
+    private func tokenText(_ count: Int) -> String { AITokenFormat.text(count) }
 
     /// 只在真有事时出现的警示行;一切正常时这张卡不存在,首屏保持安静。
     private var attentionLine: (text: String, symbol: String)? {
@@ -1586,6 +1572,8 @@ struct SettingsView: View {
 
                 aiBalanceSettingsCard
 
+                sectionsEditor
+
                 homeCardsEditor
 
                 healthReportCard
@@ -1756,6 +1744,33 @@ struct SettingsView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled((aiKeyDrafts[provider] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
+    /// 板块编辑:哪些一级板块出现在底栏。总览与设置固定。
+    @AppStorage("hiddenSections") private var hiddenSectionsRaw = "history"
+
+    private var sectionsEditor: some View {
+        LiquidCard {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(title: String(localized: "板块"), subtitle: String(localized: "底栏显示哪几个"))
+                Text(String(localized: "不想看的板块直接藏掉。总览与设置固定显示;「趋势」默认收起,随时勾回来。"))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(AppSection.allCases.filter { $0 != .overview && $0 != .settings }) { section in
+                    Toggle(isOn: Binding(
+                        get: { AppSection.visibleSections.contains(section) },
+                        set: { visible in
+                            AppSection.setHidden(section, hidden: !visible)
+                            hiddenSectionsRaw = UserDefaults.standard.string(forKey: "hiddenSections") ?? ""
+                        }
+                    )) {
+                        Label(section.title, systemImage: section.symbol)
+                            .font(.callout)
+                    }
+                }
             }
         }
     }

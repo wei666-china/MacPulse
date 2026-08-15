@@ -5,14 +5,31 @@ enum AppSection: String, CaseIterable, Identifiable {
     case battery
     case performance
     case network
+    case ai
     case history
     case settings
+
+    /// 可见板块。默认「AI」顶替「趋势」的位置(Wei 拍板)——趋势没删,
+    /// 在设置的板块编辑里随时勾回来。总览与设置固定,不许藏。
+    static var visibleSections: [AppSection] {
+        let hidden = Set((UserDefaults.standard.string(forKey: "hiddenSections") ?? "history")
+            .split(separator: ",").map(String.init))
+        return allCases.filter { $0 == .overview || $0 == .settings || !hidden.contains($0.rawValue) }
+    }
+
+    static func setHidden(_ section: AppSection, hidden: Bool) {
+        var set = Set((UserDefaults.standard.string(forKey: "hiddenSections") ?? "history")
+            .split(separator: ",").map(String.init))
+        if hidden { set.insert(section.rawValue) } else { set.remove(section.rawValue) }
+        UserDefaults.standard.set(set.sorted().joined(separator: ","), forKey: "hiddenSections")
+    }
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .overview: String(localized: "总览")
+        case .ai: "AI"
         case .battery: String(localized: "电池")
         case .performance: String(localized: "性能")
         case .network: String(localized: "网络")
@@ -24,6 +41,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .overview: "sparkles"
+        case .ai: "brain"
         case .battery: "battery.75percent"
         case .performance: "gauge.with.dots.needle.67percent"
         case .network: "wifi"
@@ -41,6 +59,8 @@ struct RootView: View {
     @EnvironmentObject private var model: DashboardModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var section: AppSection = .overview
+    /// 板块配置变化时让 tab 栏重算(设置页写这个键)。
+    @AppStorage("hiddenSections") private var hiddenSectionsRaw = "history"
     @Namespace private var tabAnimation
 
     var body: some View {
@@ -56,6 +76,7 @@ struct RootView: View {
                 Group {
                     switch section {
                     case .overview: OverviewView()
+                    case .ai: AIView()
                     case .battery: BatteryView()
                     case .performance: PerformanceView()
                     case .network: NetworkView()
@@ -87,6 +108,14 @@ struct RootView: View {
         .onDisappear {
             model.presentationDidDisappear(presentation)
             model.sectionChanged(nil)
+        }
+        .onAppear {
+            // 调试钩子:-MacPulseOpenSection ai 启动后直达指定板块,
+            // 供无辅助功能权限的自动化截图验收;正常启动无此参数零影响。
+            if let raw = UserDefaults.standard.string(forKey: "MacPulseOpenSection"),
+               let target = AppSection(rawValue: raw) {
+                section = target
+            }
         }
         .onChange(of: model.navigationRequest) { _, request in
             guard let request else { return }
@@ -144,7 +173,7 @@ struct RootView: View {
 
     private var tabBar: some View {
         HStack(spacing: 2) {
-            ForEach(AppSection.allCases) { item in
+            ForEach(AppSection.visibleSections) { item in
                 Button {
                     withAnimation(reduceMotion ? nil : .snappy(duration: 0.28)) {
                         section = item

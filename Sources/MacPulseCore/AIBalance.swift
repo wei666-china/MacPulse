@@ -244,3 +244,137 @@ extension ISO8601DateFormatter {
         return formatter
     }()
 }
+
+// MARK: - 订阅额度(Claude / Codex)
+
+/// 一个订阅限额窗口(如「5 小时窗」「每周」)。
+/// 存 used,显示层算 remaining——Wei 的要求:主角是「还剩多少」。
+public struct QuotaWindow: Sendable, Equatable, Identifiable {
+    public var label: String
+    public var usedPercent: Double
+    public var resetsAt: Date?
+
+    public init(label: String, usedPercent: Double, resetsAt: Date?) {
+        self.label = label
+        self.usedPercent = usedPercent
+        self.resetsAt = resetsAt
+    }
+
+    public var id: String { label }
+    public var remainingPercent: Double { max(0, 100 - usedPercent) }
+}
+
+public struct SubscriptionQuota: Sendable, Equatable {
+    public enum Source: String, Sendable {
+        case claude
+        case codex
+    }
+
+    public var source: Source
+    public var windows: [QuotaWindow]
+    public var planType: String?
+    public var fetchedAt: Date
+
+    public init(source: Source, windows: [QuotaWindow], planType: String? = nil, fetchedAt: Date) {
+        self.source = source
+        self.windows = windows
+        self.planType = planType
+        self.fetchedAt = fetchedAt
+    }
+}
+
+/// Codex 会话日志里的 rate_limits 快照解析(纯函数)。
+/// 行形状(实测本机 2026-08-15):
+/// …"rate_limits":{"primary":{"used_percent":30.0,"window_minutes":10080,
+///   "resets_at":1787385898},"secondary":…,"plan_type":"plus"…}
+/// 零网络零逆向——Codex CLI 自己把额度写进了本地日志。
+public enum CodexRateLimitParser {
+
+    /// 从一行 JSONL 提取快照;不是 rate_limits 行返回 nil。
+    public static func parse(line: String, now: Date) -> SubscriptionQuota? {
+        guard line.contains("\"rate_limits\""),
+              let data = line.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        // rate_limits 可能嵌在 payload 里,递归找第一个。
+        guard let limits = findRateLimits(in: root) else { return nil }
+
+        var windows: [QuotaWindow] = []
+        for key in ["primary", "secondary"] {
+            guard let window = limits[key] as? [String: Any],
+                  let used = (window["used_percent"] as? NSNumber)?.doubleValue
+            else { continue }
+            let minutes = (window["window_minutes"] as? NSNumber)?.intValue
+            let resets = (window["resets_at"] as? NSNumber).map {
+                Date(timeIntervalSince1970: $0.doubleValue)
+            }
+            windows.append(QuotaWindow(
+                label: Self.windowLabel(minutes: minutes),
+                usedPercent: used,
+                resetsAt: resets
+            ))
+        }
+        guard !windows.isEmpty else { return nil }
+        return SubscriptionQuota(
+            source: .codex,
+            windows: windows,
+            planType: limits["plan_type"] as? String,
+            fetchedAt: now
+        )
+    }
+
+    private static func findRateLimits(in object: Any, depth: Int = 0) -> [String: Any]? {
+        guard depth < 6, let dict = object as? [String: Any] else { return nil }
+        if let limits = dict["rate_limits"] as? [String: Any] { return limits }
+        for value in dict.values {
+            if let found = findRateLimits(in: value, depth: depth + 1) { return found }
+        }
+        return nil
+    }
+
+    static func windowLabel(minutes: Int?) -> String {
+        switch minutes {
+        case .some(10080): String(localized: "每周")
+        case .some(let m) where m >= 60 && m % 60 == 0 && m < 10080:
+            String(format: String(localized: "%@ 小时窗"), String(describing: m / 60))
+        case .some(let m): String(format: String(localized: "%@ 分钟窗"), String(describing: m))
+        case .none: String(localized: "额度窗")
+        }
+    }
+}
+
+/// Claude 订阅用量响应解析(api.anthropic.com/api/oauth/usage,未文档化接口)。
+/// 防御式:形状是「若干窗口对象,各带 utilization(0-100)与 resets_at」,
+/// 键名容错;完全对不上就返回 nil,绝不编数字。
+public enum ClaudeSubscriptionParser {
+
+    public static func parse(data: Data, now: Date) -> SubscriptionQuota? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        var windows: [QuotaWindow] = []
+
+        let known: [(keys: [String], label: String)] = [
+            (["five_hour", "fiveHour", "session"], String(localized: "5 小时窗")),
+            (["seven_day", "sevenDay", "weekly", "seven_day_all_models"], String(localized: "每周·全模型")),
+            (["seven_day_opus", "seven_day_sonnet", "weekly_opus", "seven_day_oauth_apps"], String(localized: "每周·高阶模型")),
+        ]
+        for entry in known {
+            for key in entry.keys {
+                guard let window = root[key] as? [String: Any] else { continue }
+                guard let used = numeric(window["utilization"]) ?? numeric(window["used_percent"]) else { continue }
+                let resets = numeric(window["resets_at"]).map { Date(timeIntervalSince1970: $0) }
+                    ?? (window["resets_at"] as? String).flatMap {
+                        ISO8601DateFormatter.shared.date(from: $0)
+                            ?? ISO8601DateFormatter.sharedFractional.date(from: $0)
+                    }
+                windows.append(QuotaWindow(label: entry.label, usedPercent: used, resetsAt: resets))
+                break
+            }
+        }
+        guard !windows.isEmpty else { return nil }
+        return SubscriptionQuota(source: .claude, windows: windows, fetchedAt: now)
+    }
+
+    private static func numeric(_ value: Any?) -> Double? {
+        (value as? NSNumber)?.doubleValue
+    }
+}

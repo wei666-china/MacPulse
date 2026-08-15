@@ -89,6 +89,11 @@ final class DashboardModel: ObservableObject {
     /// Claude Code 今日本地用量(零网络,~/.claude 日志统计)。
     @Published private(set) var claudeCodeUsage: ClaudeCodeUsage?
     @Published private(set) var aiBalanceRefreshedAt: Date?
+    /// Codex 订阅额度(本地日志快照,零网络)。
+    @Published private(set) var codexQuota: SubscriptionQuota?
+    /// Claude 订阅额度(未文档化接口,设置里明确开启才请求)。
+    @Published private(set) var claudeQuota: SubscriptionQuota?
+    private let claudeSubscriptionReader = ClaudeSubscriptionReader()
     private let aiBalanceService = AIBalanceService()
     private var aiBalanceRefreshInFlight = false
 
@@ -1181,9 +1186,19 @@ final class DashboardModel: ObservableObject {
             let usage = await Task.detached(priority: .utility) {
                 ClaudeCodeUsageReader.todayUsage()
             }.value
+            let codex = await Task.detached(priority: .utility) {
+                CodexQuotaReader.latestQuota()
+            }.value
+            var claude: SubscriptionQuota?
+            if UserDefaults.standard.bool(forKey: "claudeSubscriptionEnabled") {
+                claude = await self.claudeSubscriptionReader.fetch()
+            }
             self.aiBalances = readings
             self.aiBalanceErrors = errors
             self.claudeCodeUsage = usage
+            self.codexQuota = codex
+            // 429 等瞬时失败时保留上一次的好数据(带时间戳),不闪没。
+            if let claude { self.claudeQuota = claude }
             self.aiBalanceRefreshedAt = .now
             self.aiBalanceRefreshInFlight = false
         }
