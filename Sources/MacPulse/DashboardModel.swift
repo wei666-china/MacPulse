@@ -1196,6 +1196,18 @@ final class DashboardModel: ObservableObject {
     /// 在 body 里同步读钥匙串等于每次重绘都可能弹框+阻塞。
     @Published private(set) var claudeTokenState: ClaudeSubscriptionReader.TokenState = .missing
 
+    /// 用户点「去授权」才走这条:后台发起一次钥匙串读取,系统会弹一次
+    /// 授权框。不在后台偷偷弹——那样用户会莫名其妙看到一个要密码的框。
+    func requestClaudeKeychainAccess() {
+        Task.detached(priority: .userInitiated) {
+            let state = ClaudeSubscriptionReader.tokenState()
+            await MainActor.run {
+                self.claudeTokenState = state
+                if case .token = state { self.refreshAIBalances(force: true) }
+            }
+        }
+    }
+
     func refreshClaudeTokenState() {
         Task.detached(priority: .utility) {
             let state = ClaudeSubscriptionReader.tokenState()

@@ -37,6 +37,29 @@ struct AIView: View {
                 subtitle: String(localized: "未文档化接口·数据与 Claude Code 的 /usage 同源"),
                 quota: claude
             )
+        } else if model.claudeTokenState == .keychainDenied, claudeSubscriptionEnabled {
+            // 钥匙串没授权:这不是「读不到」,是「差一次点击」。
+            // 给一个明确按钮,点了才去触发系统对话框——不在后台偷偷弹。
+            LiquidCard(padding: 12) {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "key.horizontal")
+                        .foregroundStyle(MacPulseTheme.warm)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(String(localized: "Claude 订阅额度:差一次授权"))
+                            .font(.callout.weight(.semibold))
+                        Text(String(localized: "额度要用 Claude Code 存在钥匙串里的登录态来查。点下面的按钮,系统会问一次「是否允许 MacPulse 读取」,选「始终允许」之后就一直有效。"))
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button(String(localized: "去授权")) {
+                            model.requestClaudeKeychainAccess()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
         } else if !claudeSubscriptionEnabled {
             LiquidCard(padding: 12) {
                 HStack(spacing: 8) {

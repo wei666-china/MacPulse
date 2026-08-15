@@ -798,3 +798,6 @@
 "AI 额度提醒" = "AI quota alerts";
 "订阅额度剩余低于 15% 时提醒;同一计费周期只提醒一次" = "Alert when a subscription quota drops below 15% remaining; once per billing period";
 "AI 额度" = "AI quota";
+"Claude 订阅额度:差一次授权" = "Claude subscription quota: one approval away";
+"额度要用 Claude Code 存在钥匙串里的登录态来查。点下面的按钮,系统会问一次「是否允许 MacPulse 读取」,选「始终允许」之后就一直有效。" = "Reading the quota uses the Claude Code login stored in your Keychain. Tap below and macOS asks once whether MacPulse may read it — choose “Always Allow” and it stays granted.";
+"去授权" = "Authorize";
