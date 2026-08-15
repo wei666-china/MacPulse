@@ -711,3 +711,31 @@
 "主页卡片" = "Home cards";
 "自己排你的头版" = "Arrange your own front page";
 "勾选显示哪些卡、用箭头调顺序。英雄卡与硬件警示条固定显示,不在此列。" = "Choose which cards show and reorder with the arrows. The hero card and hardware alerts are always shown and not listed here.";
+
+/* AI balance panel */
+"%@ 个会话 · 本地日志统计(含缓存读写),零网络" = "%@ sessions · counted from local logs (incl. cache), zero network";
+"%@ 分钟前更新" = "updated %@ min ago";
+"AI 余额" = "AI Balances";
+"AI 余额:在设置页添加服务商 API key 后,这里显示各家余额" = "AI Balances: add provider API keys in Settings to see balances here";
+"Claude Code 今日" = "Claude Code today";
+"key 无效或已过期" = "key invalid or expired";
+"余额请求只发往各服务商官方接口,key 存在系统钥匙串,不进任何报告。" = "Balance requests go only to each provider's official endpoint; keys live in the system Keychain and never enter any report.";
+"保存" = "Save";
+"充值 %@ · 赠金 %@" = "Topped up %@ · granted %@";
+"充值 ¥%@ · 赠送 ¥%@" = "Topped up ¥%@ · gifted ¥%@";
+"入 %@ · 出 %@" = "in %@ · out %@";
+"刚刚更新" = "updated just now";
+"响应格式变了,等更新适配" = "Response format changed; needs an app update";
+"填入服务商的 API key 后,总览页的「AI 余额」卡会显示余额。key 只存系统钥匙串;余额请求只发往各服务商官方接口,不发送任何设备信息;Claude Code 用量为本地日志统计,零配置零网络。" = "Add a provider's API key and the AI Balances card on Overview shows what's left. Keys are stored only in the system Keychain; balance requests go only to each provider's official endpoint with no device info; Claude Code usage is counted from local logs — zero config, zero network.";
+"已用 $%.2f" = "$%.2f used";
+"已配置" = "Configured";
+"服务端返回 %@" = "Server returned %@";
+"查各家还剩多少钱" = "See what's left at each provider";
+"此 key 未设限额,查不到余额" = "This key has no limit set, so no balance is available";
+"清除" = "Remove";
+"现金 ¥%.2f · 代金券 ¥%.2f" = "Cash ¥%.2f · voucher ¥%.2f";
+"硅基流动" = "SiliconFlow";
+"粘贴 API key" = "Paste API key";
+"网络不可达" = "Network unreachable";
+"各 AI 服务商余额接口的调法清单(channel-billing)" = "The playbook of AI-provider balance endpoints (channel-billing)";
+"Claude Code 本地会话日志统计用量的思路" = "The approach of counting usage from local Claude Code session logs";

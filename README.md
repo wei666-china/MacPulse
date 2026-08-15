@@ -78,7 +78,12 @@ ad-hoc 签名,不需要付费开发者账号。也可以直接在 Xcode 打开 `
 
 ## 隐私
 
-除网络测速外,MacPulse 不发送任何网络请求。
+除网络测速与 AI 余额查询外,MacPulse 不发送任何网络请求。
+
+AI 余额查询是第二个明确同意制功能:只有你在设置页填入某家服务商的 API key,
+App 才会向**该服务商的官方接口**发起余额查询(GET + Bearer key,15 分钟节流,
+不附带任何设备信息)。key 只存系统钥匙串,可随时清除;不填 key 就零请求。
+Claude Code 用量为本地日志统计,不发任何网络请求。
 
 网络测速首次使用需要明确同意,在此之前不发出任何请求。开启后只连接
 `speed.cloudflare.com`(测速数据,无意义填充字节)与 `captive.apple.com`
@@ -99,6 +104,8 @@ MacPulse 的几块核心读取能力,是在这些开源项目里学到的。点�
 | [mactop](https://github.com/metaspartan/mactop) | Carsen Klock | IOReport 能耗模型与集群频率的原生读取思路(dlsym 绑定、通道订阅、Δ能量→瓦特) | MIT |
 | [Stats](https://github.com/exelban/stats) | Serhiy Mytrovtsiy | AppleSMC 用户客户端的结构体布局、选择子与 sp78/flt/fpe2 类型解码 | MIT |
 | [WhatCable](https://github.com/darrylmorley/whatcable) | Darryl Morley | USB-C 充电口与线缆 e-marker 的 PD 位解码,以及充电瓶颈判定思路 | MIT |
+| [one-api](https://github.com/songquanpeng/one-api) | JustSong | AI 服务商余额接口的调法清单(channel-billing.go) | MIT |
+| [ccusage](https://github.com/ryoppippi/ccusage) | ryoppippi | Claude Code 本地会话日志统计用量的思路 | MIT |
 
 MacPulse's core reading techniques were learned from these projects — named here with exactly
 what was adapted, because that's what respect for other people's work looks like. Full license

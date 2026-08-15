@@ -12,6 +12,7 @@ enum OverviewCard: String, CaseIterable, Identifiable {
     case consumers
     case metricsGrid
     case liveChart
+    case aiBalance
 
     var id: String { rawValue }
 
@@ -22,6 +23,7 @@ enum OverviewCard: String, CaseIterable, Identifiable {
         case .consumers: String(localized: "谁在耗电")
         case .metricsGrid: String(localized: "芯片热点与功耗")
         case .liveChart: String(localized: "实时能量")
+        case .aiBalance: String(localized: "AI 余额")
         }
     }
 
@@ -102,6 +104,8 @@ struct OverviewView: View {
             metricsGrid
         case .liveChart:
             liveChart
+        case .aiBalance:
+            aiBalanceCard
         }
     }
 
@@ -124,6 +128,111 @@ struct OverviewView: View {
                 symbol: "bolt.horizontal.fill",
                 tint: MacPulseTheme.plugged
             )
+        }
+    }
+
+    /// AI 余额:已配置服务商的余额 + Claude Code 本地用量(零配置)。
+    /// 什么都没有时显示一行引导,不摆空卡。
+    @ViewBuilder
+    private var aiBalanceCard: some View {
+        if model.aiBalances.isEmpty, model.aiBalanceErrors.isEmpty, model.claudeCodeUsage == nil {
+            LiquidCard(padding: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "brain")
+                        .foregroundStyle(MacPulseTheme.ink)
+                    Text(String(localized: "AI 余额:在设置页添加服务商 API key 后,这里显示各家余额"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+            }
+        } else {
+            LiquidCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        SectionHeader(
+                            title: String(localized: "AI 余额"),
+                            subtitle: model.aiBalanceRefreshedAt.map { aiRefreshedText($0) }
+                        )
+                        Spacer(minLength: 0)
+                        Button {
+                            model.refreshAIBalances(force: true)
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    ForEach(model.aiBalances) { reading in
+                        VStack(alignment: .leading, spacing: 2) {
+                            ValueRow(
+                                title: reading.provider.displayName,
+                                value: reading.primary,
+                                symbol: "creditcard",
+                                tint: MacPulseTheme.ink
+                            )
+                            if let detail = reading.detail {
+                                Text(detail)
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.leading, 28)
+                            }
+                        }
+                    }
+                    ForEach(Array(model.aiBalanceErrors.keys.sorted { $0.rawValue < $1.rawValue }), id: \.self) { provider in
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.caption)
+                                .foregroundStyle(MacPulseTheme.warm)
+                            Text("\(provider.displayName):\(model.aiBalanceErrors[provider] ?? "")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if let usage = model.claudeCodeUsage {
+                        if !model.aiBalances.isEmpty || !model.aiBalanceErrors.isEmpty {
+                            Divider()
+                        }
+                        ValueRow(
+                            title: String(localized: "Claude Code 今日"),
+                            value: String(
+                                format: String(localized: "入 %@ · 出 %@"),
+                                tokenText(usage.inputTokens + usage.cacheReadTokens + usage.cacheCreationTokens),
+                                tokenText(usage.outputTokens)
+                            ),
+                            symbol: "terminal",
+                            tint: MacPulseTheme.ink
+                        )
+                        Text(String(
+                            format: String(localized: "%@ 个会话 · 本地日志统计(含缓存读写),零网络"),
+                            String(describing: usage.sessionCount)
+                        ))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, 28)
+                    }
+                    Text(String(localized: "余额请求只发往各服务商官方接口,key 存在系统钥匙串,不进任何报告。"))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func aiRefreshedText(_ date: Date) -> String {
+        let seconds = max(0, Date().timeIntervalSince(date))
+        if seconds < 90 { return String(localized: "刚刚更新") }
+        return String(format: String(localized: "%@ 分钟前更新"), String(describing: Int(seconds / 60)))
+    }
+
+    /// token 数的人话格式:1.2M / 340K / 950。
+    private func tokenText(_ count: Int) -> String {
+        switch count {
+        case 1_000_000...: String(format: "%.1fM", Double(count) / 1_000_000)
+        case 1_000...: String(format: "%.0fK", Double(count) / 1_000)
+        default: String(describing: count)
         }
     }
 
@@ -1475,6 +1584,8 @@ struct SettingsView: View {
                     }
                 }
 
+                aiBalanceSettingsCard
+
                 homeCardsEditor
 
                 healthReportCard
@@ -1587,6 +1698,65 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             syncLoginItemState()
             Task { await model.refreshNotificationAuthorization() }
+        }
+    }
+
+    /// AI 余额:各服务商 API key 的录入与清除。key 只进系统钥匙串。
+    @State private var aiKeyDrafts: [AIProvider: String] = [:]
+
+    private var aiBalanceSettingsCard: some View {
+        LiquidCard {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(title: String(localized: "AI 余额"), subtitle: String(localized: "查各家还剩多少钱"))
+                Text(String(localized: "填入服务商的 API key 后,总览页的「AI 余额」卡会显示余额。key 只存系统钥匙串;余额请求只发往各服务商官方接口,不发送任何设备信息;Claude Code 用量为本地日志统计,零配置零网络。"))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(AIProvider.allCases) { provider in
+                    aiProviderRow(provider)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func aiProviderRow(_ provider: AIProvider) -> some View {
+        HStack(spacing: 8) {
+            Text(provider.displayName)
+                .font(.callout)
+                .frame(width: 130, alignment: .leading)
+            if model.aiConfiguredProviders.contains(provider) {
+                Label(String(localized: "已配置"), systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(MacPulseTheme.normal)
+                Spacer(minLength: 0)
+                Button(String(localized: "清除")) {
+                    AIKeyStore.delete(for: provider)
+                    model.reloadAIProviders()
+                    model.refreshAIBalances(force: true)
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .foregroundStyle(.red)
+            } else {
+                SecureField(String(localized: "粘贴 API key"), text: Binding(
+                    get: { aiKeyDrafts[provider] ?? "" },
+                    set: { aiKeyDrafts[provider] = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+                Button(String(localized: "保存")) {
+                    let draft = aiKeyDrafts[provider] ?? ""
+                    guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                    AIKeyStore.save(draft, for: provider)
+                    aiKeyDrafts[provider] = ""
+                    model.reloadAIProviders()
+                    model.refreshAIBalances(force: true)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled((aiKeyDrafts[provider] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
         }
     }
 
@@ -1716,6 +1886,18 @@ struct SettingsView: View {
                     author: "Serhiy Mytrovtsiy",
                     detail: String(localized: "SMC 温度/功率读取的结构布局与类型解码"),
                     url: "https://github.com/exelban/stats"
+                )
+                acknowledgementRow(
+                    name: "one-api",
+                    author: "JustSong",
+                    detail: String(localized: "各 AI 服务商余额接口的调法清单(channel-billing)"),
+                    url: "https://github.com/songquanpeng/one-api"
+                )
+                acknowledgementRow(
+                    name: "ccusage",
+                    author: "ryoppippi",
+                    detail: String(localized: "Claude Code 本地会话日志统计用量的思路"),
+                    url: "https://github.com/ryoppippi/ccusage"
                 )
                 acknowledgementRow(
                     name: "WhatCable",

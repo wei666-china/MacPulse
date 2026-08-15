@@ -81,6 +81,17 @@ final class DashboardModel: ObservableObject {
     /// 评审抓获的口径分裂:此前芯片页读 GPUPH 驻留,诊断读设备利用率,
     /// 用户从诊断跳到芯片页看到的是另一个定义的数字(48% 对 95%)。
     @Published private(set) var gpuDeviceUtilizationPercent: Double?
+    /// AI 余额读数(已配置的服务商)。
+    @Published private(set) var aiBalances: [AIBalanceReading] = []
+    /// 取数失败的服务商与人话原因——失败要摆出来,不许静默变旧数据。
+    @Published private(set) var aiBalanceErrors: [AIProvider: String] = [:]
+    @Published private(set) var aiConfiguredProviders: [AIProvider] = []
+    /// Claude Code 今日本地用量(零网络,~/.claude 日志统计)。
+    @Published private(set) var claudeCodeUsage: ClaudeCodeUsage?
+    @Published private(set) var aiBalanceRefreshedAt: Date?
+    private let aiBalanceService = AIBalanceService()
+    private var aiBalanceRefreshInFlight = false
+
     /// 「为什么卡」取样状态,总览卡直接 switch 它渲染三态。
     @Published private(set) var bottleneckProbe: BottleneckProbePhase = .idle
     /// 总览卡发出的跳转请求;RootView/PerformanceView 消费后置 nil。
@@ -674,6 +685,7 @@ final class DashboardModel: ObservableObject {
         updateSamplingMode()
         restartProcessSampler()
         scheduleNetworkTest(trigger: .panelOpen)
+        refreshAIBalances()
     }
 
     func presentationDidDisappear(_ source: PresentationSource) {
@@ -1133,6 +1145,58 @@ final class DashboardModel: ObservableObject {
     /// 窗口不受影响,用户手滑收掉也不丢外发素材。
     func dismissBottleneckResult() {
         if case .done = bottleneckProbe { bottleneckProbe = .idle }
+    }
+
+    // MARK: - AI 余额
+
+    func reloadAIProviders() {
+        aiConfiguredProviders = AIKeyStore.configuredProviders
+    }
+
+    /// 刷新余额与本地用量。非强制时 15 分钟节流——余额不是秒级数据,
+    /// 高频轮询只是在骚扰服务商和费电。
+    func refreshAIBalances(force: Bool = false) {
+        reloadAIProviders()
+        if !force, let last = aiBalanceRefreshedAt,
+           Date().timeIntervalSince(last) < 900 { return }
+        guard !aiBalanceRefreshInFlight else { return }
+        guard !aiConfiguredProviders.isEmpty || claudeCodeUsage == nil else {
+            // 没配任何服务商时只刷本地用量。
+            refreshClaudeCodeUsageOnly()
+            return
+        }
+        aiBalanceRefreshInFlight = true
+        let providers = aiConfiguredProviders
+        Task { [weak self] in
+            guard let self else { return }
+            var readings: [AIBalanceReading] = []
+            var errors: [AIProvider: String] = [:]
+            for provider in providers {
+                guard let key = AIKeyStore.load(for: provider) else { continue }
+                switch await self.aiBalanceService.fetch(provider: provider, key: key) {
+                case .success(let reading): readings.append(reading)
+                case .failure(let error): errors[provider] = error.message
+                }
+            }
+            let usage = await Task.detached(priority: .utility) {
+                ClaudeCodeUsageReader.todayUsage()
+            }.value
+            self.aiBalances = readings
+            self.aiBalanceErrors = errors
+            self.claudeCodeUsage = usage
+            self.aiBalanceRefreshedAt = .now
+            self.aiBalanceRefreshInFlight = false
+        }
+    }
+
+    private func refreshClaudeCodeUsageOnly() {
+        Task { [weak self] in
+            let usage = await Task.detached(priority: .utility) {
+                ClaudeCodeUsageReader.todayUsage()
+            }.value
+            self?.claudeCodeUsage = usage
+            self?.aiBalanceRefreshedAt = .now
+        }
     }
 
     // MARK: - 跳转通道
