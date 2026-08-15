@@ -329,6 +329,75 @@ final class BottleneckDiagnosisTests: XCTestCase {
         XCTAssertEqual(verdict.kind, .noBottleneck)
     }
 
+    // MARK: 交叉评审回归(2026-08-15,另一 AI 构造的反例)
+
+    /// 评审反例:四个核各 100%、总负载 40%、进程 raw 400%——旧判据照样报
+    /// 「一个核被跑满,其余大多空闲」且点不出名。并行负载不是单核瓶颈,
+    /// 核视图证据现在要求平均热核数 ≤1.5。
+    func testFourBusyCoresAreNotSingleCoreBound() throws {
+        let parallel = BottleneckProcessCandidate(name: "make", rawCPUPercent: 400)
+        let cores: [Double] = [100, 100, 100, 100, 5, 4, 6, 3, 2, 4]
+        let verdict = try XCTUnwrap(BottleneckDiagnosis.diagnose(input(
+            ticks: [tick(cpu: 40, perCore: cores), tick(cpu: 41, perCore: cores), tick(cpu: 39, perCore: cores)],
+            processes: [parallel]
+        )))
+        XCTAssertNotEqual(verdict.kind, .singleCoreBound, "四个热核不是「一个核被跑满」")
+        XCTAssertEqual(verdict.kind, .noBottleneck)
+    }
+
+    /// 评审反例:单拍 GPU=100 曾能直接定罪「GPU 已被吃满」——超时只剩 1 拍时
+    /// observedFloor 被 min(2,count) 降到 1。现在门槛无条件为 2:
+    /// 单拍窗口连 CPU 都算未观测,diagnose 返回 nil,宁可没有结论。
+    func testSingleTickWindowYieldsNoVerdict() {
+        XCTAssertNil(BottleneckDiagnosis.diagnose(input(
+            ticks: [tick(cpu: 30, gpu: 100)]
+        )), "单拍不许出任何结论")
+    }
+
+    /// capture 契约:超时也先收拍再结案,collected 恒等于真实拍数——
+    /// 旧状态机超时先 return 丢拍,再把 UI 谎报成 3/3。
+    func testCaptureCollectsTickOnTimeoutAndNeverLies() {
+        var window = BottleneckProbeWindow()
+        // 正常两拍
+        XCTAssertEqual(window.capture(tick(), elapsed: 2), .sampling(collected: 1))
+        XCTAssertEqual(window.capture(tick(), elapsed: 4), .sampling(collected: 2))
+        // 第三拍超时:仍要收下,结案时报真实数 3
+        XCTAssertEqual(window.capture(tick(), elapsed: 25), .settle(collected: 3))
+        XCTAssertEqual(window.ticks.count, 3)
+        // 超时早收工:1 拍就结案,collected 如实为 1(下游 diagnose 会拒绝定罪)
+        var short = BottleneckProbeWindow()
+        XCTAssertEqual(short.capture(tick(), elapsed: 30), .settle(collected: 1))
+        XCTAssertEqual(short.ticks.count, 1)
+    }
+
+    /// 攒满三拍正常结案。
+    func testCaptureSettlesWhenComplete() {
+        var window = BottleneckProbeWindow()
+        _ = window.capture(tick(), elapsed: 2)
+        _ = window.capture(tick(), elapsed: 4)
+        XCTAssertEqual(window.capture(tick(), elapsed: 6), .settle(collected: 3))
+    }
+
+    /// 评审反例:节流原料按窗口采(Tick 新字段)。窗口内三拍都在降频形状,
+    /// 结账瞬时值已恢复——用窗口聚合喂 ThrottleDiagnosis 必须报热降频。
+    func testThrottleInputsTravelWithTicks() throws {
+        let hotTick = tick(cpu: 92, hotspot: 96)
+        var withThrottle = hotTick
+        withThrottle.pClusterActivePercent = 92
+        withThrottle.pClusterFreqMHz = 2280
+        withThrottle.pClusterMaxFreqMHz = 3808
+        let ticks = [withThrottle, withThrottle, withThrottle]
+        // 模拟模型侧的窗口聚合(windowThrottleDiagnosis 的算法)
+        let throttle = ThrottleDiagnosis.diagnose(.init(
+            clusterActivePercent: 92, clusterFreqMHz: 2280, clusterMaxFreqMHz: 3808,
+            hotspotTemperature: 96, thermalLevel: .nominal,
+            lowPowerModeEnabled: false, onBattery: false
+        ))
+        XCTAssertEqual(throttle?.kind, .thermal, "窗口证据成立就要报,不看结账瞬时值")
+        let verdict = try XCTUnwrap(BottleneckDiagnosis.diagnose(input(ticks: ticks, throttle: throttle)))
+        XCTAssertEqual(verdict.kind, .thermalThrottle)
+    }
+
     // MARK: 实测回归(2026-08-15,本机 M5,Metal 计算烧机器)
 
     /// 真机样本:GPU 饱和场景实测。Device Utilization 均值 98(峰 100),

@@ -91,7 +91,7 @@ struct OverviewView: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(String(localized: "为什么卡?"))
                                 .font(.callout.weight(.semibold))
-                            Text(String(localized: "点一下,约 5 秒定位瓶颈"))
+                            Text(String(localized: "点一下,约 8 秒定位瓶颈"))
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         }

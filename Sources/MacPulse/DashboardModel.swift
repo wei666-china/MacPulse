@@ -77,6 +77,10 @@ final class DashboardModel: ObservableObject {
     /// 换页/交换/压缩的瞬时速率。nil = 尚无基线(首拍)或该拍读取失败。
     /// 判「正在疯狂换页」只能靠它——swap 用量是历史遗迹,速率才是现在时。
     @Published private(set) var memoryRates: MemoryRates?
+    /// GPU 设备利用率(活动监视器同源)。芯片页「占用」与瓶颈诊断共用这一个,
+    /// 评审抓获的口径分裂:此前芯片页读 GPUPH 驻留,诊断读设备利用率,
+    /// 用户从诊断跳到芯片页看到的是另一个定义的数字(48% 对 95%)。
+    @Published private(set) var gpuDeviceUtilizationPercent: Double?
     /// 「为什么卡」取样状态,总览卡直接 switch 它渲染三态。
     @Published private(set) var bottleneckProbe: BottleneckProbePhase = .idle
     /// 总览卡发出的跳转请求;RootView/PerformanceView 消费后置 nil。
@@ -88,6 +92,10 @@ final class DashboardModel: ObservableObject {
     /// 窗口攒满后进入「结账」等待:再触发一次进程采样并等它落账,
     /// 归因才有完整差分(新进程首拍没有基线,算不出 CPU%)。
     private var probeSettling = false
+    /// 进程数据的代号,processGroups 每次落账 +1。结账要等到「本代」数据,
+    /// 不能固定睡 2 秒赌它到了——评审抓获:慢机上会拿旧榜单归因。
+    private var processGeneration = 0
+    private var probeWaitingSinceGeneration = 0
     /// 当前接着的屏幕。只在芯片子页可见时刷新。
     @Published private(set) var displays: [DisplayInfo] = []
     /// 近 7 天热降频事件的时间戳。瞬时诊断攒成历史才看得出规律。
@@ -973,15 +981,11 @@ final class DashboardModel: ObservableObject {
     }
 
     /// 每拍采证。必须在 current 更新之后调(与热事件记录同一条教训:
-    /// 放在前面读到的是上一拍的旧快照)。
+    /// 放在前面读到的是上一拍的旧快照)。收拍与结账裁决在 Core 的 capture 里:
+    /// 超时也先收下当前拍再结案,collected 由 Core 保证等于真实拍数。
     private func captureBottleneckTickIfNeeded() {
         guard case .sampling = bottleneckProbe, !probeSettling else { return }
-        // 超时保险:系统卡顿/时钟跳变导致拍攒不够时按已有拍结案,不永远转圈。
-        if let started = probeStartedAt, Date().timeIntervalSince(started) > 20 {
-            finishBottleneckProbe()
-            return
-        }
-        probeWindow.ticks.append(BottleneckProbeWindow.Tick(
+        let tick = BottleneckProbeWindow.Tick(
             timestamp: .now,
             cpuUsagePercent: current.deep.cpuUsagePercent,
             perCoreUsage: perCoreUsage,
@@ -995,31 +999,47 @@ final class DashboardModel: ObservableObject {
             diskWriteBytesPerSecond: current.deep.diskWriteBytesPerSecond,
             hotspotTemperature: current.deep.hotspotTemperature,
             thermalLevel: current.deep.thermalLevel,
-            collectorLive: collectorStatus.phase == .live
-        ))
-        if probeWindow.isComplete {
-            finishBottleneckProbe()
-        } else {
+            collectorLive: collectorStatus.phase == .live,
+            pClusterActivePercent: current.deep.socCompute?.pClusterActivePercent,
+            pClusterFreqMHz: current.deep.socCompute?.pClusterFreqMHz,
+            pClusterMaxFreqMHz: current.deep.socCompute?.pClusterMaxFreqMHz,
+            lowPowerModeEnabled: ProcessInfo.processInfo.isLowPowerModeEnabled
+        )
+        let elapsed = probeStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+        switch probeWindow.capture(tick, elapsed: elapsed) {
+        case .sampling(let collected):
             bottleneckProbe = .sampling(
-                collected: probeWindow.ticks.count,
+                collected: collected,
                 required: BottleneckProbeWindow.requiredTicks
             )
+        case .settle(let collected):
+            finishBottleneckProbe(collected: collected)
         }
     }
 
     /// 窗口攒满:先触发「结账」进程采样,与开场那次构成跨越整个窗口的
     /// 差分区间——探针启动后才出现的进程(实测:取样前 3 秒启动的 yes)
     /// 首拍没有基线,不等这一步它就进不了归因候选。
-    private func finishBottleneckProbe() {
+    private func finishBottleneckProbe(collected: Int) {
         guard !probeSettling else { return }
         probeSettling = true
+        // collected 来自 Core 的 capture,== 真实拍数;超时早收工时 UI 如实
+        // 显示 1/3、2/3,不再谎报 3/3(评审抓获的旧行为)。
         bottleneckProbe = .sampling(
-            collected: BottleneckProbeWindow.requiredTicks,
+            collected: collected,
             required: BottleneckProbeWindow.requiredTicks
         )
+        probeWaitingSinceGeneration = processGeneration
         restartProcessSampler()
         Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            // 等「本代」进程数据落账(重启采样后的那一拍),上限 6 秒。
+            // 到点没等到就用现有榜单诚实降级——归因可能滞后,但不装新鲜。
+            for _ in 0..<12 {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard let self else { return }
+                if self.processGeneration > self.probeWaitingSinceGeneration { break }
+                if !self.probeSettling { return }   // 已被取消
+            }
             self?.completeBottleneckProbe()
         }
     }
@@ -1036,21 +1056,9 @@ final class DashboardModel: ObservableObject {
             bottleneckProbe = .idle
             return
         }
-        // 进程候选:采样层已按综合负载排好序,取非自身前十(与总览同一榜)。
-        let candidates = processGroups
-            .filter { !$0.isMacPulse }
-            .prefix(10)
-            .map { group in
-                BottleneckProcessCandidate(
-                    name: group.displayName,
-                    rawCPUPercent: group.smoothedCPUPercent ?? group.cpuPercent,
-                    gpuNanosecondsPerSecond: group.gpuNanosecondsPerSecond,
-                    diskReadBytesPerSecond: group.diskReadBytesPerSecond,
-                    diskWriteBytesPerSecond: group.diskWriteBytesPerSecond,
-                    memoryFootprintBytes: group.physicalFootprintBytes
-                )
-            }
+        let candidates = Self.bottleneckCandidates(from: processGroups)
         // ANE 按需直读,绕开「仅芯片子页刷新」的门控——诊断多在总览页触发。
+        //(bottleneckCandidates 的定义在本函数下方)
         let aneNames: [String]? = aneReader.activeClientPIDs().map { resolveNames(for: $0) }
         let diagnosis = BottleneckDiagnosis.diagnose(.init(
             window: probeWindow,
@@ -1061,7 +1069,7 @@ final class DashboardModel: ObservableObject {
             lowPowerModeEnabled: ProcessInfo.processInfo.isLowPowerModeEnabled,
             aneHolderNames: aneNames,
             anePowerWatts: current.deep.anePowerWatts,
-            throttle: throttleDiagnosis
+            throttle: windowThrottleDiagnosis()
         ))
         if let diagnosis {
             lastBottleneck = (diagnosis, .now)
@@ -1070,6 +1078,54 @@ final class DashboardModel: ObservableObject {
             // CPU 都读不到的机器,取样只会一直空转;回 idle 由入口卡重试。
             bottleneckProbe = .idle
         }
+    }
+
+    /// 节流结论按**取样窗口**推导,不用结账瞬时值——窗口内降频过、结账时
+    /// 恢复了,漏报;反之污染。原料每拍都采在 Tick 里,这里聚合后喂现有判定。
+    private func windowThrottleDiagnosis() -> ThrottleDiagnosis? {
+        let ticks = probeWindow.ticks
+        guard !ticks.isEmpty else { return throttleDiagnosis }
+        func mean(_ values: [Double?]) -> Double? {
+            let xs = values.compactMap { $0 }
+            return xs.isEmpty ? nil : xs.reduce(0, +) / Double(xs.count)
+        }
+        let severity: [ThermalLevel: Int] = [.nominal: 0, .unknown: 0, .fair: 1, .serious: 2, .critical: 3]
+        let worstThermal = ticks.map(\.thermalLevel).max { (severity[$0] ?? 0) < (severity[$1] ?? 0) } ?? .nominal
+        return ThrottleDiagnosis.diagnose(.init(
+            clusterActivePercent: mean(ticks.map(\.pClusterActivePercent)),
+            clusterFreqMHz: mean(ticks.map { $0.pClusterFreqMHz.map(Double.init) }).map(Int.init),
+            clusterMaxFreqMHz: ticks.compactMap(\.pClusterMaxFreqMHz).max(),
+            hotspotTemperature: mean(ticks.map(\.hotspotTemperature)),
+            thermalLevel: worstThermal,
+            lowPowerModeEnabled: ticks.contains { $0.lowPowerModeEnabled },
+            onBattery: current.battery.powerSource == .battery
+        ))
+    }
+
+    /// 诊断的进程候选榜。综合负载前十 + **GPU 最重的过线进程**——
+    /// 评审抓获:compositeScore 无 GPU 维(CPU45+内存30+磁盘15+能耗10),
+    /// CPU 轻、GPU 重的进程(跑推理的典型形状)进不了前十,GPU 饱和照报
+    /// 但点不出名。GPUProcessReader 开头的注释早骂过同款错误,这次自己犯了。
+    static func bottleneckCandidates(from groups: [ProcessGroupSnapshot]) -> [BottleneckProcessCandidate] {
+        func candidate(_ group: ProcessGroupSnapshot) -> BottleneckProcessCandidate {
+            BottleneckProcessCandidate(
+                name: group.displayName,
+                rawCPUPercent: group.smoothedCPUPercent ?? group.cpuPercent,
+                gpuNanosecondsPerSecond: group.gpuNanosecondsPerSecond,
+                diskReadBytesPerSecond: group.diskReadBytesPerSecond,
+                diskWriteBytesPerSecond: group.diskWriteBytesPerSecond,
+                memoryFootprintBytes: group.physicalFootprintBytes
+            )
+        }
+        let others = groups.filter { !$0.isMacPulse }
+        var result = others.prefix(10).map(candidate)
+        let gpuHeavy = others
+            .filter { ($0.gpuNanosecondsPerSecond ?? 0) >= BottleneckDiagnosis.gpuCulpritNanoseconds }
+            .max { ($0.gpuNanosecondsPerSecond ?? 0) < ($1.gpuNanosecondsPerSecond ?? 0) }
+        if let gpuHeavy, !result.contains(where: { $0.name == gpuHeavy.displayName }) {
+            result.append(candidate(gpuHeavy))
+        }
+        return Array(result)
     }
 
     // MARK: - 跳转通道
@@ -1157,14 +1213,18 @@ final class DashboardModel: ObservableObject {
         // 第一句话——这是全 App 唯一能点名回答它的结论。60 分钟新鲜度门:
         // 过期的瞬时结论比没有更误导,按缺失处理并教用户去哪重新生成。
         if let last = lastBottleneck, Date().timeIntervalSince(last.at) < 3_600 {
-            let minutes = max(1, Int(Date().timeIntervalSince(last.at) / 60))
+            let age = Date().timeIntervalSince(last.at)
+            // 与总览卡同一把尺:不到 90 秒叫「刚刚」,不吹成「1 分钟前」。
+            let stamp = age < 90
+                ? String(localized: "刚刚")
+                : String(format: String(localized: "%@ 分钟前"), String(describing: Int(age / 60)))
             items.append(.init(
                 level: last.diagnosis.isWarning ? .warning
                     : (last.diagnosis.kind == .noBottleneck ? .ok : .notice),
                 category: String(localized: "瞬时瓶颈"),
                 summary: String(
-                    format: String(localized: "%@(诊断于 %@ 分钟前)"),
-                    last.diagnosis.summary, String(describing: minutes)
+                    format: String(localized: "%@(诊断于%@)"),
+                    last.diagnosis.summary, stamp
                 ),
                 detail: last.diagnosis.isWarning ? last.diagnosis.detail : nil
             ))
@@ -1347,6 +1407,7 @@ final class DashboardModel: ObservableObject {
 
     private func receiveProcessSample(_ result: ProcessSamplingResult) {
         processGroups = result.groups
+        processGeneration += 1
         processMonitorStatus = result.status
         guard processHistoryEnabled, let timestamp = result.status.lastUpdated else { return }
         if let completed = processAggregator.append(
@@ -1392,6 +1453,7 @@ final class DashboardModel: ObservableObject {
         memory = fallback.memoryBreakdown()
         memoryExtras = fallback.memoryExtras()
         memoryRates = fallback.memoryRates()
+        gpuDeviceUtilizationPercent = GPUUtilizationReader.read()
         if let cores = fallback.perCoreUsage() { perCoreUsage = cores }
         // 只在芯片页可见时扫 ANE 持有者——这是一次 IORegistry 子树遍历，
         // 没人看的时候没有理由跑。

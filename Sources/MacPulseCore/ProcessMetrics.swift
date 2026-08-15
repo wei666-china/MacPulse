@@ -418,6 +418,28 @@ public enum ProcessAggregation {
         )
     }
 
+    /// 榜单截断的并集规则。单一综合分截 top-N 会把「GPU 重、其他都轻」的
+    /// 进程(本地跑推理的典型形状)整个扔掉——评审构造 55 个普通进程 +
+    /// 1 个 GPU-only,后者 rank 56,在采样层就消失,诊断层再怎么找都点不到名。
+    /// 解法:综合分前 limit 名之外,GPU 时间过线者按 GPU 序补进(至多 gpuExtra 名)。
+    public static func topGroups(
+        _ groups: [ProcessGroupSnapshot],
+        limit: Int = 50,
+        gpuFloorNanoseconds: Double = 2e8,
+        gpuExtra: Int = 5
+    ) -> [ProcessGroupSnapshot] {
+        var result = Array(groups.prefix(limit))
+        let kept = Set(result.map(\.stableIdentifier))
+        let gpuHeavy = groups.dropFirst(limit)
+            .filter { ($0.gpuNanosecondsPerSecond ?? 0) >= gpuFloorNanoseconds }
+            .sorted { ($0.gpuNanosecondsPerSecond ?? 0) > ($1.gpuNanosecondsPerSecond ?? 0) }
+            .prefix(gpuExtra)
+        for group in gpuHeavy where !kept.contains(group.stableIdentifier) {
+            result.append(group)
+        }
+        return result
+    }
+
     public static func group(_ snapshots: [ProcessSnapshot]) -> [ProcessGroupSnapshot] {
         let byPID = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.pid, $0) })
         var buckets: [String: [ProcessSnapshot]] = [:]

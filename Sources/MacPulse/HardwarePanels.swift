@@ -140,12 +140,20 @@ struct SoCPanelView: View {
                     title: "GPU",
                     subtitle: deep.chip?.gpuCoreCount.map { String(format: String(localized: "%@ 核"), String(describing: $0)) }
                 )
+                // 「占用」= 设备利用率,与「为什么卡」诊断、活动监视器同一口径。
+                // 评审抓获的口径分裂:此前这行读 GPUPH 驻留(放视频趋近 100%
+                // 而真实利用率 48%),从诊断跳过来的用户对不上数。读不到就
+                // 「不可用」,不拿驻留回填充数。
                 ValueRow(
                     title: String(localized: "占用"),
-                    value: MetricFormat.percent(deep.gpuUsagePercent),
+                    value: MetricFormat.percent(model.gpuDeviceUtilizationPercent),
                     symbol: "square.3.layers.3d",
                     tint: .cyan
                 )
+                Text(String(localized: "占用为设备利用率,与活动监视器同源;频率行反映当前性能档位。"))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
                 ValueRow(
                     title: String(localized: "频率"),
                     value: deep.socCompute?.gpuFreqMHz.map { "\($0) MHz" } ?? String(localized: "不可用"),

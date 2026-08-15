@@ -80,7 +80,9 @@ actor ProcessSampler {
         )
         smoothedCPU = nextSmoothed
 
-        let groups = Array(ProcessAggregation.group(snapshots).prefix(50))
+        // 并集截榜:综合分 top-50 + GPU 过线者。纯 prefix(50) 会在采样层
+        // 就丢掉 GPU-only 进程,下游诊断永远点不到名(评审实测 rank 56)。
+        let groups = ProcessAggregation.topGroups(ProcessAggregation.group(snapshots))
         return ProcessSamplingResult(
             groups: groups,
             status: ProcessMonitorStatus(
@@ -149,8 +151,10 @@ actor ProcessSampler {
     }()
 
     private static func machTicksToNanoseconds(_ ticks: UInt64) -> UInt64 {
-        // 先除后乘会丢精度,先乘后除 64 位内可能溢出——
-        // 拆成商与余数两段算,既不溢出也不丢精度。
+        // 先除后乘丢精度,先乘后除会溢出,商余拆分兼顾两者。
+        // 边界诚实声明:ticks 接近 UInt64.max 时 quotient*numer 仍会溢出,
+        // 但输入是进程累计 CPU 时间(mach tick ≈41.67ns),溢出需要单进程
+        // 累计约 2.4 万年 CPU 时间——超出机器与人类的服役期,不做饱和处理。
         let (numer, denom) = machTimebase
         let quotient = ticks / denom
         let remainder = ticks % denom
@@ -203,7 +207,10 @@ actor ProcessSampler {
             parentPID: parentPID,
             userID: userID,
             startAbstime: start,
-            timestamp: timestamp,
+            // 每个进程各自盖戳,不共用循环开始的那一个:几百个 pid 逐个读
+            // rusage,机器忙时整圈能拖零点几秒,共用戳会让差分窗口与读数
+            // 窗口错位,CPU% 随负载抖动。逐个盖戳后分子分母同窗。
+            timestamp: Date(),
             launchDate: bsdResult == bsdSize && bsdInfo.pbi_start_tvsec > 0
                 ? Date(timeIntervalSince1970: TimeInterval(bsdInfo.pbi_start_tvsec))
                 : app?.launchDate,

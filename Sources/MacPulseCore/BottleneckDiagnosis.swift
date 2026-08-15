@@ -19,6 +19,12 @@ public struct BottleneckProbeWindow: Sendable, Equatable {
         public var hotspotTemperature: Double?
         public var thermalLevel: ThermalLevel
         public var collectorLive: Bool
+        /// 节流判定的原料,按拍采集——评审抓获:窗口内发生过、结账时已恢复
+        /// 的降频会漏报;结账时才出现的降频会污染前一个窗口。
+        public var pClusterActivePercent: Double?
+        public var pClusterFreqMHz: Int?
+        public var pClusterMaxFreqMHz: Int?
+        public var lowPowerModeEnabled: Bool
 
         public init(
             timestamp: Date = .init(timeIntervalSince1970: 0),
@@ -32,7 +38,11 @@ public struct BottleneckProbeWindow: Sendable, Equatable {
             diskWriteBytesPerSecond: Double? = nil,
             hotspotTemperature: Double? = nil,
             thermalLevel: ThermalLevel = .nominal,
-            collectorLive: Bool = false
+            collectorLive: Bool = false,
+            pClusterActivePercent: Double? = nil,
+            pClusterFreqMHz: Int? = nil,
+            pClusterMaxFreqMHz: Int? = nil,
+            lowPowerModeEnabled: Bool = false
         ) {
             self.timestamp = timestamp
             self.cpuUsagePercent = cpuUsagePercent
@@ -46,16 +56,41 @@ public struct BottleneckProbeWindow: Sendable, Equatable {
             self.hotspotTemperature = hotspotTemperature
             self.thermalLevel = thermalLevel
             self.collectorLive = collectorLive
+            self.pClusterActivePercent = pClusterActivePercent
+            self.pClusterFreqMHz = pClusterFreqMHz
+            self.pClusterMaxFreqMHz = pClusterMaxFreqMHz
+            self.lowPowerModeEnabled = lowPowerModeEnabled
         }
     }
 
     public var ticks: [Tick]
-    /// 2 秒节奏下 3 拍 ≈ 4–6 秒窗口,文案统一说「约 5 秒」。
+    /// 2 秒节奏 3 拍 + 结账采样 2 秒,墙钟约 8 秒(文案与此一致,不吹「5 秒」)。
     public static let requiredTicks = 3
+    /// 超时保险线:超过它就按已有拍结案,不永远转圈。
+    public static let timeoutSeconds: TimeInterval = 20
     public var isComplete: Bool { ticks.count >= Self.requiredTicks }
 
     public init(ticks: [Tick] = []) {
         self.ticks = ticks
+    }
+
+    public enum CaptureDecision: Equatable {
+        /// 继续采,collected 是**真实**已收拍数——UI 只许显示这个数。
+        case sampling(collected: Int)
+        /// 该结账了(攒满或超时),collected 同样是真实拍数。
+        case settle(collected: Int)
+    }
+
+    /// 收下这一拍并裁决下一步。超时也**先收拍再结案**——评审抓获的旧 bug:
+    /// 超时路径先 return 把当前拍丢掉,然后 UI 把 collected 谎报成 3/3。
+    /// 把决定收进 Core 后:collected 永远等于 ticks.count,谎报在类型上不可能;
+    /// 且 settle 至少带 1 拍(capture 必先 append),「0 拍闪 3/3」不复存在。
+    public mutating func capture(_ tick: Tick, elapsed: TimeInterval) -> CaptureDecision {
+        ticks.append(tick)
+        if isComplete || elapsed > Self.timeoutSeconds {
+            return .settle(collected: ticks.count)
+        }
+        return .sampling(collected: ticks.count)
     }
 }
 
@@ -199,6 +234,11 @@ public struct BottleneckDiagnosis: Sendable, Equatable {
     public static let singleCoreTotalCeilingPercent: Double = 50
     /// 单核点名线:进程 raw(单核制)≥90,正是「主线程跑满一个核」的形状。
     public static let singleCoreCulpritRawPercent: Double = 90
+    /// 「热核」计数线:≥90% 算一个忙核。核视图证据要求平均热核数 ≤1.5——
+    /// 评审构造的反例:四核各 100%、总负载 40%,旧判据照样报「一个核被跑满」。
+    /// 并行负载不是单核瓶颈,热核数必须≈1 才许用核视图证据。
+    public static let singleCoreHotThreshold: Double = 90
+    public static let singleCoreMaxMeanHotCores: Double = 1.5
     /// 进程证据的上限:raw ≤140 才算「单核形状」——再高就是多线程并行负载,
     /// 机器不卡它,它也不是被单核顶住。
     public static let singleCoreCulpritRawCeiling: Double = 140
@@ -252,9 +292,12 @@ public struct BottleneckDiagnosis: Sendable, Equatable {
         let ticks = input.window.ticks
         guard !ticks.isEmpty else { return nil }
 
-        // ---- 窗口聚合。信号「被观测到」= ≥2 拍有非 nil 读数(单拍不算数,
-        // 防采集器中途上线的一拍数据撑起一个结论)。窗口只有 1 拍时放宽为 1。
-        let observedFloor = min(2, ticks.count)
+        // ---- 窗口聚合。信号「被观测到」= ≥2 拍有非 nil 读数,**无条件**——
+        // 单拍不算数,防采集器中途上线的一拍数据撑起一个结论。评审抓获:
+        // 旧实现 min(2, count) 在超时只剩 1 拍时把门降到 1,单拍 GPU=99 就能
+        // 定罪「GPU 已被吃满」。现在 1 拍窗口连 CPU 都算「未观测」→ diagnose
+        // 返回 nil → 状态机回 idle,宁可不给结论也不给单拍结论。
+        let observedFloor = 2
 
         func series(_ values: [Double?]) -> (mean: Double, peak: Double, min: Double)? {
             let present = values.compactMap { $0 }
@@ -277,6 +320,10 @@ public struct BottleneckDiagnosis: Sendable, Equatable {
             return r.compressionBytesPerSecond + r.decompressionBytesPerSecond
         })
         let maxCore = series(ticks.map { $0.perCoreUsage.max() })
+        let hotCores = series(ticks.map { tick -> Double? in
+            tick.perCoreUsage.isEmpty ? nil : Double(tick.perCoreUsage.filter { $0 >= singleCoreHotThreshold }.count)
+        })
+        let lowPowerInWindow = ticks.contains { $0.lowPowerModeEnabled }
         let worstPressure = ticks.map(\.memoryPressure.rawValue).max() ?? 0
 
         var windowSeconds: Double = Double(ticks.count) * 2
@@ -334,7 +381,7 @@ public struct BottleneckDiagnosis: Sendable, Equatable {
             if let culprit, let ns = culprit.gpuNanosecondsPerSecond {
                 // 铁律:只报提交量 ms/s,绝不说「它占 GPU x%」。
                 evidence.append(String(
-                    format: String(localized: "%@ 提交了 %@ ms/s 的 GPU 命令"),
+                    format: String(localized: "%@ 在 GPU 上的累计执行时间约 %@ ms/s"),
                     culprit.name, String(format: "%.0f", ns / 1_000_000)
                 ))
             }
@@ -439,7 +486,11 @@ public struct BottleneckDiagnosis: Sendable, Equatable {
                 // 两条独立证据,任一成立即判:
                 // A. 核视图:有核持续 ≥95(未迁移的钉死)
                 // B. 进程侧:某进程 raw 在 [90,140](单核形状;迁移也不影响 raw)
-                let coreEvidence = maxCore.map { $0.mean >= singleCoreBusyPercent } ?? false
+                let coreEvidence = {
+                    guard let maxCore, let hotCores else { return false }
+                    return maxCore.mean >= singleCoreBusyPercent
+                        && hotCores.mean <= singleCoreMaxMeanHotCores
+                }()
                 let culprit = input.processes
                     .filter {
                         guard let raw = $0.rawCPUPercent else { return false }
@@ -475,7 +526,7 @@ public struct BottleneckDiagnosis: Sendable, Equatable {
         // ---- 低电量模式:只在有需求被压着时才是解释。
         let demandPresent = (cpu?.mean ?? 0) >= lowPowerDemandPercent
             || (gpu?.mean ?? 0) >= lowPowerDemandPercent
-        if input.lowPowerModeEnabled, demandPresent {
+        if input.lowPowerModeEnabled || lowPowerInWindow, demandPresent {
             findings.append(Finding(
                 subsystem: .power,
                 kind: .lowPowerCapped,
