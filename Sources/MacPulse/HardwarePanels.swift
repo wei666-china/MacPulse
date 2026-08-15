@@ -29,18 +29,10 @@ struct SoCPanelView: View {
         }
     }
 
-    /// 「机器怎么突然变慢了」。判据用性能集群:它是重活的主力,
-    /// 能效集群本来就常年低频,拿它判会天天误报。
+    /// 「机器怎么突然变慢了」。推导在 model.throttleDiagnosis 单点维护
+    /// (判据用性能集群:它是重活的主力,能效集群常年低频,拿它判会天天误报)。
     private var throttleDiagnosis: ThrottleDiagnosis? {
-        ThrottleDiagnosis.diagnose(.init(
-            clusterActivePercent: deep.socCompute?.pClusterActivePercent,
-            clusterFreqMHz: deep.socCompute?.pClusterFreqMHz,
-            clusterMaxFreqMHz: deep.socCompute?.pClusterMaxFreqMHz,
-            hotspotTemperature: deep.hotspotTemperature,
-            thermalLevel: deep.thermalLevel,
-            lowPowerModeEnabled: deep.lowPowerModeEnabled ?? false,
-            onBattery: model.current.battery.powerSource == .battery
-        ))
+        model.throttleDiagnosis
     }
 
     private func throttleCard(_ diagnosis: ThrottleDiagnosis) -> some View {

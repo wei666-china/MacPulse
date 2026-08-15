@@ -59,6 +59,9 @@ final class DashboardModel: ObservableObject {
     @Published private(set) var sleepSessions: [SleepSession] = []
     /// 内存吃紧判据的额外原料(swap 与系统压力等级)。
     @Published private(set) var memoryExtras = MemorySnapshotExtras()
+    /// 换页/交换/压缩的瞬时速率。nil = 尚无基线(首拍)或该拍读取失败。
+    /// 判「正在疯狂换页」只能靠它——swap 用量是历史遗迹,速率才是现在时。
+    @Published private(set) var memoryRates: MemoryRates?
     /// 当前接着的屏幕。只在芯片子页可见时刷新。
     @Published private(set) var displays: [DisplayInfo] = []
     /// 近 7 天热降频事件的时间戳。瞬时诊断攒成历史才看得出规律。
@@ -892,10 +895,10 @@ final class DashboardModel: ObservableObject {
         return MemoryDiagnosis.diagnose(breakdown: memory, extras: memoryExtras)
     }
 
-    /// 记录一次热降频事件。同一次持续降频只记开头——
-    /// 每 2 秒记一条会把「一次长时间过热」灌成几百条,规律反而看不见。
-    private func recordThrottleEventIfNeeded() {
-        let verdict = ThrottleDiagnosis.diagnose(.init(
+    /// 节流结论。芯片页卡片与降频事件记录共用同一份推导,
+    /// Input 的构造只此一处——此前它在 UI 层和这里各写了一份,已合并。
+    var throttleDiagnosis: ThrottleDiagnosis? {
+        ThrottleDiagnosis.diagnose(.init(
             clusterActivePercent: current.deep.socCompute?.pClusterActivePercent,
             clusterFreqMHz: current.deep.socCompute?.pClusterFreqMHz,
             clusterMaxFreqMHz: current.deep.socCompute?.pClusterMaxFreqMHz,
@@ -904,7 +907,12 @@ final class DashboardModel: ObservableObject {
             lowPowerModeEnabled: current.deep.lowPowerModeEnabled ?? false,
             onBattery: current.battery.powerSource == .battery
         ))
-        guard verdict?.kind == .thermal else { return }
+    }
+
+    /// 记录一次热降频事件。同一次持续降频只记开头——
+    /// 每 2 秒记一条会把「一次长时间过热」灌成几百条,规律反而看不见。
+    private func recordThrottleEventIfNeeded() {
+        guard throttleDiagnosis?.kind == .thermal else { return }
         let now = Date()
         // 5 分钟内算同一次事件。
         if let last = throttleEvents.last, now.timeIntervalSince(last) < 300 { return }
@@ -1191,6 +1199,7 @@ final class DashboardModel: ObservableObject {
         // 界面上表现为重连一次就跳一次。现在只有一个口径。
         memory = fallback.memoryBreakdown()
         memoryExtras = fallback.memoryExtras()
+        memoryRates = fallback.memoryRates()
         if let cores = fallback.perCoreUsage() { perCoreUsage = cores }
         // 只在芯片页可见时扫 ANE 持有者——这是一次 IORegistry 子树遍历，
         // 没人看的时候没有理由跑。

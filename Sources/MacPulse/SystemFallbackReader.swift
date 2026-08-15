@@ -9,6 +9,9 @@ import MacPulseCore
 final class SystemFallbackReader {
     private var previousTicks: (user: UInt32, system: UInt32, idle: UInt32, nice: UInt32)?
     private var previousCoreTicks: [(user: UInt32, system: UInt32, idle: UInt32, nice: UInt32)]?
+    /// 换页速率差分的基线。跨睡眠不重置:唤醒后第一拍 elapsed 巨大、速率被摊薄,
+    /// 但瓶颈诊断的取样窗口整个都在唤醒之后,不受影响。
+    private var previousVMCounters: (counters: VMCumulativeCounters, date: Date)?
 
     /// VM 统计的计数单位是内核页。
     ///
@@ -119,6 +122,41 @@ final class SystemFallbackReader {
             swapUsedBytes: swapUsed,
             swapTotalBytes: swapTotal,
             pressureLevel: pressure
+        )
+    }
+
+    /// 换页/交换/压缩的瞬时速率。首次调用返回 nil——没有基线就没有差分,
+    /// 宁可「不可用」也不凭空给 0(与 perCoreUsage 同一条规矩)。
+    ///
+    /// 为什么独立做一次 host_statistics64 而不搭 memoryBreakdown 的车:
+    /// 差分需要稳定的时间戳配对,揉进别人的调用路径,哪天那边加了门控
+    /// 或换了节奏,这边的速率就悄悄失真。µs 级 syscall,独立跑不心疼。
+    func memoryRates() -> MemoryRates? {
+        var stats = vm_statistics64()
+        var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &stats) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+
+        let current = VMCumulativeCounters(
+            pageins: UInt64(stats.pageins),
+            pageouts: UInt64(stats.pageouts),
+            swapins: UInt64(stats.swapins),
+            swapouts: UInt64(stats.swapouts),
+            compressions: UInt64(stats.compressions),
+            decompressions: UInt64(stats.decompressions)
+        )
+        let now = Date()
+        defer { previousVMCounters = (current, now) }
+        guard let previous = previousVMCounters else { return nil }
+        return MemoryRates.compute(
+            previous: previous.counters,
+            current: current,
+            elapsed: now.timeIntervalSince(previous.date),
+            pageSize: pageSize
         )
     }
 
