@@ -151,6 +151,37 @@ final class BottleneckDiagnosisTests: XCTestCase {
         XCTAssertFalse(verdict.findings.contains { $0.kind == .cpuSaturated }, "与 cpuSaturated 互斥")
     }
 
+    /// 实测回归(2026-08-15,M5/10 核):单个 yes 进程在核间迁移,
+    /// 每核视图没有任何核持续 ≥95,但进程 raw≈100、整机 29%——
+    /// 进程侧证据必须独立成立,否则单线程钉死全部漏报。
+    func testSingleThreadMigratingAcrossCoresStillDetected() throws {
+        let yes = BottleneckProcessCandidate(name: "yes", rawCPUPercent: 99)
+        let verdict = try XCTUnwrap(BottleneckDiagnosis.diagnose(input(
+            ticks: [
+                tick(cpu: 29, perCore: [62, 55, 20, 12, 8, 6, 30, 24, 10, 7]),
+                tick(cpu: 27, perCore: [40, 70, 25, 10, 6, 5, 28, 20, 8, 6]),
+                tick(cpu: 30, perCore: [55, 48, 30, 14, 9, 7, 26, 22, 12, 8]),
+            ],
+            processes: [yes]
+        )))
+        XCTAssertEqual(verdict.kind, .singleCoreBound)
+        XCTAssertEqual(verdict.findings.first?.culpritName, "yes")
+    }
+
+    func testParallelProcessOnIdleMachineIsNotSingleCoreBound() throws {
+        // raw 300% 的并行负载在空闲机器上:不是单核形状,不许误报。
+        let parallel = BottleneckProcessCandidate(name: "ffmpeg", rawCPUPercent: 300)
+        let verdict = try XCTUnwrap(BottleneckDiagnosis.diagnose(input(
+            ticks: [
+                tick(cpu: 32, perCore: [40, 38, 35, 30, 28, 25, 33, 31, 29, 27]),
+                tick(cpu: 30, perCore: [38, 36, 33, 31, 27, 24, 30, 29, 28, 26]),
+                tick(cpu: 31, perCore: [39, 37, 34, 30, 26, 25, 31, 30, 27, 25]),
+            ],
+            processes: [parallel]
+        )))
+        XCTAssertEqual(verdict.kind, .noBottleneck)
+    }
+
     func testSingleCoreNotTriggeredWhenWholeMachineBusy() throws {
         // 总负载 ≥50 时单核判据让位——那只是并行重活的一部分。
         let verdict = try XCTUnwrap(BottleneckDiagnosis.diagnose(input(
@@ -298,7 +329,25 @@ final class BottleneckDiagnosisTests: XCTestCase {
         XCTAssertEqual(verdict.kind, .noBottleneck)
     }
 
-    // MARK: 实测回归占位
-    // 阶段 3 用本机 LM Studio 推理的真实窗口数值回填一条回归用例,
-    // 与 GPU/换页阈值校准同一提交(项目约定:每个诊断都要有实测样本定住判据)。
+    // MARK: 实测回归(2026-08-15,本机 M5,Metal 计算烧机器)
+
+    /// 真机样本:GPU 饱和场景实测。Device Utilization 均值 98(峰 100),
+    /// 烧机进程组提交 8.71e8 ns/s;同机安静但放着视频时仅 45–48。
+    /// 阈值 90/80 恰好把两种状态分开——这个样本定住这组判据。
+    func testRealGPUBurnSampleRegression() throws {
+        let burner = BottleneckProcessCandidate(
+            name: "Claude", rawCPUPercent: 45, gpuNanosecondsPerSecond: 8.71e8
+        )
+        let verdict = try XCTUnwrap(BottleneckDiagnosis.diagnose(input(
+            ticks: [tick(cpu: 20, gpu: 96), tick(cpu: 22, gpu: 98), tick(cpu: 19, gpu: 100)],
+            processes: [burner]
+        )))
+        XCTAssertEqual(verdict.kind, .gpuSaturated)
+        XCTAssertEqual(verdict.findings.first?.culpritName, "Claude")
+        // 同机对照:视频播放态的利用率绝不能触发。
+        let watching = try XCTUnwrap(BottleneckDiagnosis.diagnose(input(
+            ticks: [tick(cpu: 25, gpu: 47), tick(cpu: 27, gpu: 48), tick(cpu: 26, gpu: 45)]
+        )))
+        XCTAssertEqual(watching.kind, .noBottleneck)
+    }
 }

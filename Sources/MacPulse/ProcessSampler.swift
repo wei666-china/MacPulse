@@ -141,6 +141,22 @@ actor ProcessSampler {
         return (counters, limitedCount)
     }
 
+    /// mach 时基缓存。timebase 是进程生命周期常量,取一次。
+    private static let machTimebase: (numer: UInt64, denom: UInt64) = {
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        return (UInt64(info.numer), UInt64(max(1, info.denom)))
+    }()
+
+    private static func machTicksToNanoseconds(_ ticks: UInt64) -> UInt64 {
+        // 先除后乘会丢精度,先乘后除 64 位内可能溢出——
+        // 拆成商与余数两段算,既不溢出也不丢精度。
+        let (numer, denom) = machTimebase
+        let quotient = ticks / denom
+        let remainder = ticks % denom
+        return quotient * numer + remainder * numer / denom
+    }
+
     private func readProcess(
         pid: pid_t,
         timestamp: Date,
@@ -191,8 +207,13 @@ actor ProcessSampler {
             launchDate: bsdResult == bsdSize && bsdInfo.pbi_start_tvsec > 0
                 ? Date(timeIntervalSince1970: TimeInterval(bsdInfo.pbi_start_tvsec))
                 : app?.launchDate,
-            userTimeNanoseconds: usageResult == 0 ? usage.ri_user_time : 0,
-            systemTimeNanoseconds: usageResult == 0 ? usage.ri_system_time : 0,
+            // ri_*_time 是 mach 时基单位,不是纳秒——Apple Silicon 上 1 tick =
+            // 125/3 ≈ 41.67ns。不换算,全 App 的按进程 CPU% 会集体低 41 倍,
+            // 而「其余由小进程分摊」的长尾说明恰好把亏空藏住(实测抓获:
+            // yes 烧机进程原始差分 45ms/2s=2.3%,换算后 95%,后者才对)。
+            // Intel 时基 1/1,同一算式两边通用。
+            userTimeNanoseconds: usageResult == 0 ? Self.machTicksToNanoseconds(usage.ri_user_time) : 0,
+            systemTimeNanoseconds: usageResult == 0 ? Self.machTicksToNanoseconds(usage.ri_system_time) : 0,
             physicalFootprintBytes: usageResult == 0 ? usage.ri_phys_footprint : nil,
             diskReadBytes: usageResult == 0 ? usage.ri_diskio_bytesread : nil,
             diskWriteBytes: usageResult == 0 ? usage.ri_diskio_byteswritten : nil,

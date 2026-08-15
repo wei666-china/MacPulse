@@ -88,6 +88,16 @@ struct RootView: View {
             model.presentationDidDisappear(presentation)
             model.sectionChanged(nil)
         }
+        .onChange(of: model.navigationRequest) { _, request in
+            guard let request else { return }
+            withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
+                section = request.section
+            }
+            // 不带子页的请求当场消费;带子页的留给 PerformanceView 消费。
+            if request.pane == nil {
+                model.consumeNavigationRequest()
+            }
+        }
         .onChange(of: section) { _, value in
             model.sectionChanged(value)
         }

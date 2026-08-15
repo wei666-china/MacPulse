@@ -191,11 +191,17 @@ public struct BottleneckDiagnosis: Sendable, Equatable {
     /// CPU 点名线:单进程换算成全机制后 ≥25%。
     public static let cpuCulpritShareOfMachine: Double = 25
     /// 单核钉死:各拍 max(perCore) 的均值 ≥95(不取 100,给 timer 抖动留量)。
+    /// 注意这只是两条独立证据之一:单线程会在核间迁移(实测一个 yes 进程
+    /// 在 10 核上迁移,每核视图没有任何核持续过线),所以「某进程 raw≈一个核
+    /// 且整机很闲」是另一条独立成立的证据,不以核视图为门槛。
     public static let singleCoreBusyPercent: Double = 95
     /// 且总负载 <50——总负载也高时它只是并行重活的一部分,归 cpuSaturated。
     public static let singleCoreTotalCeilingPercent: Double = 50
     /// 单核点名线:进程 raw(单核制)≥90,正是「主线程跑满一个核」的形状。
     public static let singleCoreCulpritRawPercent: Double = 90
+    /// 进程证据的上限:raw ≤140 才算「单核形状」——再高就是多线程并行负载,
+    /// 机器不卡它,它也不是被单核顶住。
+    public static let singleCoreCulpritRawCeiling: Double = 140
     /// 磁盘忙:读写合计均值 ≥400 MB/s。只说明「有重 IO 在跑」,不断言因果。
     public static let diskBusyBytesPerSecond: Double = 400 * 1_048_576
     /// 低电量模式只在「有需求被压着」时才是卡的解释:CPU 或 GPU 均值 ≥60。
@@ -426,29 +432,43 @@ public struct BottleneckDiagnosis: Sendable, Equatable {
                     culpritName: culprit?.name,
                     isWarning: false
                 ))
-            } else if let maxCore, maxCore.mean >= singleCoreBusyPercent,
-                      cpu.mean < singleCoreTotalCeilingPercent {
-                var evidence = [String(
-                    format: String(localized: "最忙的一个核平均 %@%%,而整机只有 %@%%"),
-                    pct(maxCore.mean), pct(cpu.mean)
-                )]
+            } else if cpu.mean < singleCoreTotalCeilingPercent, findings.isEmpty {
+                // findings.isEmpty 的门:单核结论是「系统看着很闲却卡」的兜底
+                // 解释;GPU 饱和/换页/热降频在场时,raw≈一个核的进程多半只是
+                // 它们的配角(比如喂 GPU 的线程),不该另立门户。
+                // 两条独立证据,任一成立即判:
+                // A. 核视图:有核持续 ≥95(未迁移的钉死)
+                // B. 进程侧:某进程 raw 在 [90,140](单核形状;迁移也不影响 raw)
+                let coreEvidence = maxCore.map { $0.mean >= singleCoreBusyPercent } ?? false
                 let culprit = input.processes
-                    .filter { ($0.rawCPUPercent ?? 0) >= singleCoreCulpritRawPercent }
+                    .filter {
+                        guard let raw = $0.rawCPUPercent else { return false }
+                        return raw >= singleCoreCulpritRawPercent && raw <= singleCoreCulpritRawCeiling
+                    }
                     .max { ($0.rawCPUPercent ?? 0) < ($1.rawCPUPercent ?? 0) }
-                if let culprit {
-                    evidence.append(String(
-                        format: String(localized: "%@ 恰好吃满一个核——典型的主线程跑满形状"),
-                        culprit.name
+                if coreEvidence || culprit != nil {
+                    var evidence: [String] = []
+                    if let maxCore, coreEvidence {
+                        evidence.append(String(
+                            format: String(localized: "最忙的一个核平均 %@%%,而整机只有 %@%%"),
+                            pct(maxCore.mean), pct(cpu.mean)
+                        ))
+                    }
+                    if let culprit {
+                        evidence.append(String(
+                            format: String(localized: "%@ 恰好吃满一个核的量(整机 %@%% 很闲)——典型的单线程顶到头"),
+                            culprit.name, pct(cpu.mean)
+                        ))
+                    }
+                    findings.append(Finding(
+                        subsystem: .cpu,
+                        kind: .singleCoreBound,
+                        summary: String(localized: "一个核被跑满,其余大多空闲"),
+                        evidence: evidence,
+                        culpritName: culprit?.name,
+                        isWarning: false
                     ))
                 }
-                findings.append(Finding(
-                    subsystem: .cpu,
-                    kind: .singleCoreBound,
-                    summary: String(localized: "一个核被跑满,其余大多空闲"),
-                    evidence: evidence,
-                    culpritName: culprit?.name,
-                    isWarning: false
-                ))
             }
         }
 

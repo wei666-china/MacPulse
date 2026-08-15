@@ -129,6 +129,21 @@ final class ProcessHistoryStore {
         return try context.fetch(descriptor).map(\.point)
     }
 
+    /// 一次性清算:2026-08-15 修复 mach 时基换算前,写入的 CPU% 全部
+    /// 低了约 41.67 倍(ri_*_time 被当纳秒直用)。旧数据和新数据混在
+    /// 一张 7 天趋势图里会把图毁掉——错误的历史不如没有历史,整表清空。
+    /// 用 UserDefaults 标记保证只清这一次。
+    func wipeOnceForCPUScaleFix() throws {
+        let flag = "MacPulse.processHistoryWiped.cpuScaleFix20260815"
+        guard !UserDefaults.standard.bool(forKey: flag) else { return }
+        let all = try context.fetch(FetchDescriptor<ProcessHistoryRecord>())
+        all.forEach(context.delete)
+        if !all.isEmpty {
+            try context.save()
+        }
+        UserDefaults.standard.set(true, forKey: flag)
+    }
+
     func prune(days: Int = retentionDays) throws {
         let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
         let descriptor = FetchDescriptor<ProcessHistoryRecord>(

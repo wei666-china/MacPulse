@@ -24,6 +24,21 @@ enum PerformancePane: String, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
 }
 
+/// 「为什么卡」取样状态。取样寄生在 refresh() 的 2 秒节奏里,不另起管线。
+enum BottleneckProbePhase: Equatable {
+    case idle
+    case sampling(collected: Int, required: Int)
+    case done(BottleneckDiagnosis, at: Date)
+}
+
+/// 总览卡「查看 →」的跳转请求。section 与子页选择都是视图私有 @State,
+/// 只能走 model 这条广播通道;两个 RootView(弹窗+独立窗口)都会响应,
+/// 同一用户视角下可接受。
+struct NavigationRequest: Equatable {
+    var section: AppSection
+    var pane: PerformancePane?
+}
+
 @MainActor
 final class DashboardModel: ObservableObject {
     static let shared = DashboardModel()
@@ -62,6 +77,17 @@ final class DashboardModel: ObservableObject {
     /// 换页/交换/压缩的瞬时速率。nil = 尚无基线(首拍)或该拍读取失败。
     /// 判「正在疯狂换页」只能靠它——swap 用量是历史遗迹,速率才是现在时。
     @Published private(set) var memoryRates: MemoryRates?
+    /// 「为什么卡」取样状态,总览卡直接 switch 它渲染三态。
+    @Published private(set) var bottleneckProbe: BottleneckProbePhase = .idle
+    /// 总览卡发出的跳转请求;RootView/PerformanceView 消费后置 nil。
+    @Published private(set) var navigationRequest: NavigationRequest?
+    /// 最近一次瓶颈诊断,供体检报告读取。重新诊断覆盖,面板关闭不清。
+    private(set) var lastBottleneck: (diagnosis: BottleneckDiagnosis, at: Date)?
+    private var probeWindow = BottleneckProbeWindow()
+    private var probeStartedAt: Date?
+    /// 窗口攒满后进入「结账」等待:再触发一次进程采样并等它落账,
+    /// 归因才有完整差分(新进程首拍没有基线,算不出 CPU%)。
+    private var probeSettling = false
     /// 当前接着的屏幕。只在芯片子页可见时刷新。
     @Published private(set) var displays: [DisplayInfo] = []
     /// 近 7 天热降频事件的时间戳。瞬时诊断攒成历史才看得出规律。
@@ -157,6 +183,7 @@ final class DashboardModel: ObservableObject {
         var openedProcessStore: ProcessHistoryStore?
         do {
             let store = try ProcessHistoryStore()
+            try store.wipeOnceForCPUScaleFix()
             try store.prune()
             openedProcessStore = store
             processHistoryStatus = String(localized: "重点进程历史正常")
@@ -582,6 +609,15 @@ final class DashboardModel: ObservableObject {
         guard !started else { return }
         started = true
 
+        // 调试钩子:带 -MacPulseAutoProbe 启动时,6 秒后自动触发一次瓶颈诊断。
+        // 无辅助功能权限的自动化验收(截图自查)靠它;正常启动无此参数,零影响。
+        if UserDefaults.standard.bool(forKey: "MacPulseAutoProbe") {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                self?.startBottleneckProbe()
+            }
+        }
+
         // 路径监听是零流量的本机读数，与是否开启测速无关，始终运行。
         let observer = NetworkPathObserver { [weak self] snapshot in
             Task { @MainActor [weak self] in
@@ -638,6 +674,7 @@ final class DashboardModel: ObservableObject {
         // 会让「关掉菜单栏弹窗」误伤仍开在进程页的独立窗口的采样节奏。
         if activePresentationSources.isEmpty {
             processPageActive = false
+            cancelBottleneckProbeIfSampling()
             networkTriggerTask?.cancel()
             networkTriggerTask = nil
             // 已经在跑的测量走优雅停止：跑完当前块就收尾并存下来。
@@ -652,6 +689,7 @@ final class DashboardModel: ObservableObject {
         suspended = true
         // 跨越睡眠的测量是垃圾，硬取消而不是优雅停止。
         cancelNetworkTest()
+        cancelBottleneckProbeIfSampling()
         // 睡眠前收段：唤醒后另起一段，不把待机时间算进使用时间。
         sessionTracker.close(reason: .sleep, at: .now, soc: current.battery.socFinePercent ?? current.battery.percentage)
         finalizeCompletedSessions()
@@ -822,6 +860,11 @@ final class DashboardModel: ObservableObject {
     /// 注意这**不是用量排行**——macOS 不提供按进程的 ANE 用量，只提供谁开着会话。
     var aneHolderNames: [String]? {
         guard let pids = aneHolderPIDs else { return nil }
+        return resolveNames(for: pids)
+    }
+
+    /// pid → 显示名。ANE 持有者卡与瓶颈诊断共用。
+    private func resolveNames(for pids: Set<pid_t>) -> [String] {
         let names = pids.compactMap { pid -> String? in
             if let app = NSRunningApplication(processIdentifier: pid) {
                 return app.localizedName ?? app.bundleIdentifier
@@ -907,6 +950,136 @@ final class DashboardModel: ObservableObject {
             lowPowerModeEnabled: current.deep.lowPowerModeEnabled ?? false,
             onBattery: current.battery.powerSource == .battery
         ))
+    }
+
+    // MARK: - 「为什么卡」取样
+
+    /// 点按入口卡开始取样。顺手重启进程采样循环:它的首拍就是一次即时采样,
+    /// 等于零成本把归因数据刷新到 6 秒内(否则最坏 15 秒一拍)。
+    func startBottleneckProbe() {
+        if case .sampling = bottleneckProbe { return }
+        probeWindow = BottleneckProbeWindow()
+        probeStartedAt = .now
+        bottleneckProbe = .sampling(collected: 0, required: BottleneckProbeWindow.requiredTicks)
+        restartProcessSampler()
+    }
+
+    /// 跨睡眠/面板全关时丢弃半截窗口——跨睡眠的测量是垃圾,
+    /// 面板关了「约 5 秒」的承诺也兑现不了(采样率回落到 10 秒)。
+    private func cancelBottleneckProbeIfSampling() {
+        if case .sampling = bottleneckProbe { bottleneckProbe = .idle }
+        probeStartedAt = nil
+        probeSettling = false
+    }
+
+    /// 每拍采证。必须在 current 更新之后调(与热事件记录同一条教训:
+    /// 放在前面读到的是上一拍的旧快照)。
+    private func captureBottleneckTickIfNeeded() {
+        guard case .sampling = bottleneckProbe, !probeSettling else { return }
+        // 超时保险:系统卡顿/时钟跳变导致拍攒不够时按已有拍结案,不永远转圈。
+        if let started = probeStartedAt, Date().timeIntervalSince(started) > 20 {
+            finishBottleneckProbe()
+            return
+        }
+        probeWindow.ticks.append(BottleneckProbeWindow.Tick(
+            timestamp: .now,
+            cpuUsagePercent: current.deep.cpuUsagePercent,
+            perCoreUsage: perCoreUsage,
+            // 饱和判定用设备利用率(活动监视器同源),不用 GPUPH 驻留——
+            // 驻留占比在放视频的机器上趋近 100%,会喊冤案(见 GPUUtilizationReader)。
+            gpuUsagePercent: GPUUtilizationReader.read(),
+            memoryRates: memoryRates,
+            memoryPressure: memory?.pressureLevel ?? .unknown,
+            swapUsedBytes: memoryExtras.swapUsedBytes,
+            diskReadBytesPerSecond: current.deep.diskReadBytesPerSecond,
+            diskWriteBytesPerSecond: current.deep.diskWriteBytesPerSecond,
+            hotspotTemperature: current.deep.hotspotTemperature,
+            thermalLevel: current.deep.thermalLevel,
+            collectorLive: collectorStatus.phase == .live
+        ))
+        if probeWindow.isComplete {
+            finishBottleneckProbe()
+        } else {
+            bottleneckProbe = .sampling(
+                collected: probeWindow.ticks.count,
+                required: BottleneckProbeWindow.requiredTicks
+            )
+        }
+    }
+
+    /// 窗口攒满:先触发「结账」进程采样,与开场那次构成跨越整个窗口的
+    /// 差分区间——探针启动后才出现的进程(实测:取样前 3 秒启动的 yes)
+    /// 首拍没有基线,不等这一步它就进不了归因候选。
+    private func finishBottleneckProbe() {
+        guard !probeSettling else { return }
+        probeSettling = true
+        bottleneckProbe = .sampling(
+            collected: BottleneckProbeWindow.requiredTicks,
+            required: BottleneckProbeWindow.requiredTicks
+        )
+        restartProcessSampler()
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            self?.completeBottleneckProbe()
+        }
+    }
+
+    private func completeBottleneckProbe() {
+        // 结账等待期间可能被 suspend/关面板取消(phase 已回 idle)。
+        guard probeSettling, case .sampling = bottleneckProbe else {
+            probeSettling = false
+            return
+        }
+        probeSettling = false
+        defer { probeStartedAt = nil }
+        guard !probeWindow.ticks.isEmpty else {
+            bottleneckProbe = .idle
+            return
+        }
+        // 进程候选:采样层已按综合负载排好序,取非自身前十(与总览同一榜)。
+        let candidates = processGroups
+            .filter { !$0.isMacPulse }
+            .prefix(10)
+            .map { group in
+                BottleneckProcessCandidate(
+                    name: group.displayName,
+                    rawCPUPercent: group.smoothedCPUPercent ?? group.cpuPercent,
+                    gpuNanosecondsPerSecond: group.gpuNanosecondsPerSecond,
+                    diskReadBytesPerSecond: group.diskReadBytesPerSecond,
+                    diskWriteBytesPerSecond: group.diskWriteBytesPerSecond,
+                    memoryFootprintBytes: group.physicalFootprintBytes
+                )
+            }
+        // ANE 按需直读,绕开「仅芯片子页刷新」的门控——诊断多在总览页触发。
+        let aneNames: [String]? = aneReader.activeClientPIDs().map { resolveNames(for: $0) }
+        let diagnosis = BottleneckDiagnosis.diagnose(.init(
+            window: probeWindow,
+            processes: Array(candidates),
+            activeProcessorCount: ProcessInfo.processInfo.activeProcessorCount,
+            physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
+            // 直读本机,不走采集器——采集器掉线时这个证据不能跟着消失。
+            lowPowerModeEnabled: ProcessInfo.processInfo.isLowPowerModeEnabled,
+            aneHolderNames: aneNames,
+            anePowerWatts: current.deep.anePowerWatts,
+            throttle: throttleDiagnosis
+        ))
+        if let diagnosis {
+            lastBottleneck = (diagnosis, .now)
+            bottleneckProbe = .done(diagnosis, at: .now)
+        } else {
+            // CPU 都读不到的机器,取样只会一直空转;回 idle 由入口卡重试。
+            bottleneckProbe = .idle
+        }
+    }
+
+    // MARK: - 跳转通道
+
+    func requestNavigation(section: AppSection, pane: PerformancePane? = nil) {
+        navigationRequest = NavigationRequest(section: section, pane: pane)
+    }
+
+    func consumeNavigationRequest() {
+        navigationRequest = nil
     }
 
     /// 记录一次热降频事件。同一次持续降频只记开头——
@@ -1235,6 +1408,7 @@ final class DashboardModel: ObservableObject {
         current = snapshot
         // 必须在 current 更新之后判:放在前面读到的是上一拍的旧快照。
         recordThrottleEventIfNeeded()
+        captureBottleneckTickIfNeeded()
         updateRuntimeEstimate(snapshot)
         isLoading = false
         notifications.evaluate(snapshot)

@@ -17,6 +17,7 @@ struct OverviewView: View {
         ScrollView {
             VStack(spacing: 12) {
                 hero
+                bottleneckCard
                 if let attention = attentionLine {
                     attentionCard(attention)
                 }
@@ -71,6 +72,179 @@ struct OverviewView: View {
             return (String(format: String(localized: "电池健康度 %@%%,建议预约检修"), String(describing: Int(health.rounded()))), "battery.25percent")
         }
         return nil
+    }
+
+    /// 「为什么卡」入口与结果。idle 一行高不喧宾;取样中纯文本计数
+    /// (不做动画——监控 App 不许自己费电);结果内嵌展开,小白看
+    /// summary 一句话,高手逐条展开 findings 的证据。
+    @ViewBuilder
+    private var bottleneckCard: some View {
+        switch model.bottleneckProbe {
+        case .idle:
+            Button {
+                model.startBottleneckProbe()
+            } label: {
+                LiquidCard(padding: 12) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(MacPulseTheme.ink)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(String(localized: "为什么卡?"))
+                                .font(.callout.weight(.semibold))
+                            Text(String(localized: "点一下,约 5 秒定位瓶颈"))
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+        case .sampling(let collected, let required):
+            LiquidCard(padding: 12) {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(String(
+                        format: String(localized: "正在专注取样… %@/%@"),
+                        String(describing: collected), String(describing: required)
+                    ))
+                    .font(.callout)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+            }
+        case .done(let diagnosis, let at):
+            LiquidCard {
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: diagnosis.isWarning
+                            ? "exclamationmark.triangle.fill"
+                            : "checkmark.circle.fill")
+                            .foregroundStyle(diagnosis.isWarning ? MacPulseTheme.warm : MacPulseTheme.normal)
+                        Text(diagnosis.summary)
+                            .font(.callout.weight(.semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    if !diagnosis.detail.isEmpty {
+                        Text(diagnosis.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if diagnosis.findings.count == 1, diagnosis.findings[0].kind == diagnosis.kind {
+                        // 唯一发现就是头条本身:直接铺证据,不再折叠一行重复的标题。
+                        bottleneckEvidenceBlock(diagnosis.findings[0])
+                    } else {
+                        ForEach(Array(diagnosis.findings.enumerated()), id: \.offset) { _, finding in
+                            bottleneckFindingRow(finding)
+                        }
+                    }
+                    HStack {
+                        Text(String(format: String(localized: "诊断于 %@"), relativeTime(at)))
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Spacer(minLength: 0)
+                        Button(String(localized: "重新诊断")) {
+                            model.startBottleneckProbe()
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                    }
+                }
+            }
+        }
+    }
+
+    private func bottleneckEvidenceBlock(_ finding: BottleneckDiagnosis.Finding) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(finding.evidence, id: \.self) { line in
+                Text(line)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Button {
+                model.requestNavigation(
+                    section: bottleneckTarget(finding.subsystem).section,
+                    pane: bottleneckTarget(finding.subsystem).pane
+                )
+            } label: {
+                Label(String(localized: "去对应页查看"), systemImage: "arrow.right")
+                    .font(.caption2)
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+
+    private func bottleneckFindingRow(_ finding: BottleneckDiagnosis.Finding) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(finding.evidence, id: \.self) { line in
+                    Text(line)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Button {
+                    model.requestNavigation(
+                        section: bottleneckTarget(finding.subsystem).section,
+                        pane: bottleneckTarget(finding.subsystem).pane
+                    )
+                } label: {
+                    Label(String(localized: "去对应页查看"), systemImage: "arrow.right")
+                        .font(.caption2)
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding(.top, 2)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: bottleneckSymbol(finding.subsystem))
+                    .font(.caption)
+                    .foregroundStyle(finding.isWarning ? MacPulseTheme.warm : MacPulseTheme.ink)
+                    .frame(width: 16)
+                Text(finding.summary)
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .font(.caption)
+    }
+
+    private func bottleneckSymbol(_ subsystem: BottleneckDiagnosis.Subsystem) -> String {
+        switch subsystem {
+        case .cpu: "cpu"
+        case .gpu: "video"
+        case .memory: "memorychip"
+        case .disk: "internaldrive"
+        case .thermal: "thermometer.medium"
+        case .power: "battery.25percent"
+        }
+    }
+
+    private func bottleneckTarget(_ subsystem: BottleneckDiagnosis.Subsystem) -> (section: AppSection, pane: PerformancePane?) {
+        switch subsystem {
+        case .cpu: (.performance, .processes)
+        case .gpu: (.performance, .soc)
+        case .memory: (.performance, .memory)
+        case .disk: (.performance, .disk)
+        case .thermal: (.performance, .thermal)
+        case .power: (.battery, nil)
+        }
+    }
+
+    private func relativeTime(_ date: Date) -> String {
+        let seconds = max(0, Date().timeIntervalSince(date))
+        if seconds < 90 { return String(localized: "刚刚") }
+        if seconds < 3_600 { return String(format: String(localized: "%@ 分钟前"), String(describing: Int(seconds / 60))) }
+        return String(format: String(localized: "%@ 小时前"), String(describing: Int(seconds / 3_600)))
     }
 
     private func attentionCard(_ line: (text: String, symbol: String)) -> some View {

@@ -634,7 +634,7 @@
 /* Bottleneck diagnosis (Core) */
 "%@ 占了 %@ GB 内存(物理内存共 %@ GB)" = "%@ is holding %@ GB of memory (of %@ GB physical)";
 "%@ 占整机算力约 %@%%" = "%@ is using about %@%% of the whole machine";
-"%@ 恰好吃满一个核——典型的主线程跑满形状" = "%@ is consuming exactly one core — the classic shape of a pinned main thread";
+"%@ 恰好吃满一个核的量(整机 %@%% 很闲)——典型的单线程顶到头" = "%@ is consuming exactly one core's worth while the machine sits at %@%% — the classic single-thread ceiling";
 "%@ 把 GPU 吃满了,同时内存装不下、正在疯狂换页——这就是卡的原因" = "%@ is saturating the GPU while memory is thrashing — that is why things feel slow";
 "%@ 提交了 %@ ms/s 的 GPU 命令" = "%@ submitted %@ ms/s of GPU commands";
 "%@ 正在读写 %@ MB/s" = "%@ is reading/writing %@ MB/s";
@@ -667,3 +667,14 @@
 "系统 GPU 占用均值 %@%%(峰值 %@%%)" = "System GPU utilization averaged %@%% (peak %@%%)";
 "芯片 %@°C" = "chip %@°C";
 "若某个 App 仍然卡,更可能是它自己的主线程卡住了(在等网络、等磁盘或死锁),不是系统资源不够——去「性能 → 进程」页看它。" = "If one app still feels stuck, its own main thread is likely blocked (waiting on network, disk, or a deadlock) rather than starved of resources — check it under Performance → Processes.";
+
+/* Bottleneck card (Overview) */
+"为什么卡?" = "Why is it slow?";
+"点一下,约 5 秒定位瓶颈" = "One tap, ~5 seconds to find the bottleneck";
+"正在专注取样… %@/%@" = "Sampling… %@/%@";
+"去对应页查看" = "Open the relevant page";
+"重新诊断" = "Diagnose again";
+"诊断于 %@" = "Diagnosed %@";
+"刚刚" = "just now";
+"%@ 分钟前" = "%@ min ago";
+"%@ 小时前" = "%@ h ago";

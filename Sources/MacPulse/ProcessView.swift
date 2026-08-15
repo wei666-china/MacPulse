@@ -40,13 +40,25 @@ struct PerformanceView: View {
         }
         .onAppear {
             model.performancePaneChanged(pane)
+            // onAppear 也要消费跳转:切 section 时本视图刚创建,
+            // onChange 收不到已经发生的那次变化。
+            consumeNavigationIfNeeded(model.navigationRequest)
         }
         .onChange(of: pane) { _, value in
             model.performancePaneChanged(value)
         }
+        .onChange(of: model.navigationRequest) { _, request in
+            consumeNavigationIfNeeded(request)
+        }
         .onDisappear {
             model.performancePaneChanged(nil)
         }
+    }
+
+    private func consumeNavigationIfNeeded(_ request: NavigationRequest?) {
+        guard let request, request.section == .performance, let target = request.pane else { return }
+        pane = target
+        model.consumeNavigationRequest()
     }
 }
 
