@@ -19,7 +19,12 @@ struct AIView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
         }
-        .onAppear { model.refreshAIBalances() }
+        // 推迟到本轮布局之后:refreshAIBalances 会同步写 @Published
+        // (reloadAIProviders),在 onAppear 里直接调等于「视图更新期间改状态」,
+        // SwiftUI 会放弃渲染——实测整页白屏。
+        .onAppear {
+            Task { @MainActor in model.refreshAIBalances() }
+        }
     }
 
     // MARK: - 订阅额度

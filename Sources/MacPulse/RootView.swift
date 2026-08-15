@@ -125,7 +125,7 @@ struct RootView: View {
             // 供无辅助功能权限的自动化截图验收;正常启动无此参数零影响。
             if let raw = UserDefaults.standard.string(forKey: "MacPulseOpenSection"),
                let target = AppSection(rawValue: raw) {
-                section = target
+                Task { @MainActor in section = target }
             }
         }
         .onChange(of: hiddenSectionsRaw) { _, _ in

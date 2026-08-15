@@ -714,7 +714,9 @@ final class DashboardModel: ObservableObject {
         updateSamplingMode()
         restartProcessSampler()
         scheduleNetworkTest(trigger: .panelOpen)
-        refreshAIBalances()
+        // 同理推迟一拍:这个方法由视图的 onAppear 调用,同步写 @Published
+        // 会撞上「视图更新期间改状态」。
+        Task { @MainActor [weak self] in self?.refreshAIBalances() }
     }
 
     func presentationDidDisappear(_ source: PresentationSource) {
