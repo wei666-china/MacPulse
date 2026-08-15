@@ -1,0 +1,77 @@
+name: CI
+
+# 为什么要有这个文件:仓库里有 205 个测试和一套本地化门禁,在此之前全靠
+# 作者记得手动跑。3.0.0-beta.2 的 614 条英文就是在 check-l10n.py 存在之前
+# 发出去的——格式符错位编译器不查、运行时直接输出乱码,那次是运气好。
+# 机器不会忘,人会。
+#
+# 注意:检查内容不写在这里,写在 Tools/preflight.sh —— 本地 pre-push
+# 钩子调的是同一个脚本。门禁只能有一份定义,否则「本地过了」和
+# 「CI 过了」迟早不是同一句话。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支上新的推送作废旧的运行,不浪费 macOS 机时。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 与「跳过统计」步骤共用同一处定义——路径只许写这一次。
+  MACPULSE_TEST_LOG: /tmp/macpulse-test.log
+
+jobs:
+  gate:
+    name: 出门检查
+    # macos-26 标签默认即 arm64(x64 变体是 macos-26-intel/-large)。
+    # 本项目只面向 Apple Silicon,且不用 macos-latest:迁移期它会被平移到
+    # 新 OS,与「版本留痕、防工具链自升」的意图相悖。
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # 版本留痕。CI 一直绿、某天工具链自己升了版本才开始出问题,
+      # 是最难倒查的一类事故——日志里留着版本号,查起来只要一眼。
+      - name: 工具链版本
+        run: |
+          swift --version
+          xcodebuild -version
+          python3 --version
+
+      # 与本地 pre-push 钩子完全同一个脚本。脚本自己带 set -euo pipefail,
+      # 三项检查按顺序跑,任一失败退出非零。
+      - name: 出门检查(三查 · 编译 · 测试)
+        run: ./Tools/preflight.sh
+
+      # CI 跑在虚拟机上,读不到 SMC / IOReport / 电池,传感器用例会成片
+      # XCTSkip。把跳过的条目摊在运行摘要页上,免得绿灯被读成「传感器
+      # 也验过了」——这个 App 自己就不许把「没测到」显示成「没问题」,
+      # 它的门禁没理由双标。
+      - name: 跳过统计
+        if: ${{ !cancelled() }}
+        run: |
+          LOG="$MACPULSE_TEST_LOG"
+          if [ ! -f "$LOG" ]; then
+            echo "测试没能运行(前面的检查先失败了)。" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "## 本次实际跑了什么"
+            echo
+            grep -E "^[[:space:]]*Executed .* tests?" "$LOG" | tail -1 || true
+            echo
+            echo "### 跳过的用例(CI 无真实硬件,这些只有真机能验)"
+            echo
+            if grep -q "' skipped" "$LOG"; then
+              grep "' skipped" "$LOG" \
+                | sed -E "s/.*'-\[([^]]*)\]'.*/- \1/" \
+                | sort -u
+            else
+              echo "- (无)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
