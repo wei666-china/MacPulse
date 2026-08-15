@@ -1128,6 +1128,12 @@ final class DashboardModel: ObservableObject {
         return Array(result)
     }
 
+    /// 收起结果卡。只收 UI 态,lastBottleneck 保留——体检报告的 60 分钟
+    /// 窗口不受影响,用户手滑收掉也不丢外发素材。
+    func dismissBottleneckResult() {
+        if case .done = bottleneckProbe { bottleneckProbe = .idle }
+    }
+
     // MARK: - 跳转通道
 
     func requestNavigation(section: AppSection, pane: PerformancePane? = nil) {

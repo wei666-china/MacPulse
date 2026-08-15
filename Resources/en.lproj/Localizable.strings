@@ -697,3 +697,4 @@
 "%@(诊断于%@)" = "%@ (diagnosed %@)";
 "占用为设备利用率,与活动监视器同源;频率行反映当前性能档位。" = "Utilization is device utilization, same source as Activity Monitor; the frequency row reflects the current performance state.";
 "点一下,约 8 秒定位瓶颈" = "One tap, ~8 seconds to find the bottleneck";
+"收起" = "Dismiss";

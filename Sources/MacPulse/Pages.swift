@@ -81,28 +81,7 @@ struct OverviewView: View {
     private var bottleneckCard: some View {
         switch model.bottleneckProbe {
         case .idle:
-            Button {
-                model.startBottleneckProbe()
-            } label: {
-                LiquidCard(padding: 12) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(MacPulseTheme.ink)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(String(localized: "为什么卡?"))
-                                .font(.callout.weight(.semibold))
-                            Text(String(localized: "点一下,约 8 秒定位瓶颈"))
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
+            bottleneckEntryRow
         case .sampling(let collected, let required):
             LiquidCard(padding: 12) {
                 HStack(spacing: 8) {
@@ -117,6 +96,12 @@ struct OverviewView: View {
                     Spacer(minLength: 0)
                 }
             }
+        case .done(_, let at) where Date().timeIntervalSince(at) > 600:
+            // 结论是那一瞬间的快照,不该永远霸占首屏(用户原话:「这个怎么
+            // 一直在」)。10 分钟后自动收回入口态;lastBottleneck 仍在,
+            // 体检报告的 60 分钟窗口不受影响。视图每 2 秒随模型刷新,
+            // 到点自然切换,无需定时器。
+            bottleneckEntryRow
         case .done(let diagnosis, let at):
             LiquidCard {
                 VStack(alignment: .leading, spacing: 9) {
@@ -149,6 +134,11 @@ struct OverviewView: View {
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                         Spacer(minLength: 0)
+                        Button(String(localized: "收起")) {
+                            model.dismissBottleneckResult()
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
                         Button(String(localized: "重新诊断")) {
                             model.startBottleneckProbe()
                         }
@@ -158,6 +148,32 @@ struct OverviewView: View {
                 }
             }
         }
+    }
+
+    /// 入口态一行卡。idle 与「结果过期自动收起」共用。
+    private var bottleneckEntryRow: some View {
+        Button {
+            model.startBottleneckProbe()
+        } label: {
+            LiquidCard(padding: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(MacPulseTheme.ink)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(String(localized: "为什么卡?"))
+                            .font(.callout.weight(.semibold))
+                        Text(String(localized: "点一下,约 8 秒定位瓶颈"))
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func bottleneckEvidenceBlock(_ finding: BottleneckDiagnosis.Finding) -> some View {
