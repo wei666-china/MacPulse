@@ -815,6 +815,7 @@ final class DashboardModel: ObservableObject {
             guard let self else { return }
             self.chargeLink = await self.chargeLinkSampler.sample()
             self.peripheralBatteries = await self.peripheralReader.sample()
+            self.notifications.evaluatePeripherals(self.peripheralBatteries)
         }
         refreshSleepSessions()
     }
@@ -1473,6 +1474,7 @@ final class DashboardModel: ObservableObject {
         }
         if batteryPageActive {
             peripheralBatteries = await peripheralReader.sample()
+            notifications.evaluatePeripherals(peripheralBatteries)
             // 睡眠日志绝不能在这里 await:pmset 光是吐 13 万行就要 6 秒,
             // 而 refresh 全程持着重入闸——等它等于让所有实时数字冻住六到九秒。
             // 甩给独立任务,读取器自带 10 分钟节流,不会重复触发。

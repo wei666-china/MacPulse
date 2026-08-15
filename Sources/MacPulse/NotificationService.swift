@@ -68,6 +68,52 @@ final class NotificationService {
         }
     }
 
+    /// 外设低电量。按设备冷却(8 小时),阈值用户可调。
+    private var peripheralLastSent: [String: Date] = {
+        (UserDefaults.standard.dictionary(forKey: "peripheralAlertLastSent") as? [String: Double])?
+            .mapValues { Date(timeIntervalSince1970: $0) } ?? [:]
+    }()
+
+    func evaluatePeripherals(_ batteries: [PeripheralBattery]) {
+        let defaults = UserDefaults.standard
+        guard
+            defaults.object(forKey: "notificationsEnabled") as? Bool ?? true,
+            defaults.object(forKey: "peripheralAlertsEnabled") as? Bool ?? true,
+            authorizationStatus == .authorized || authorizationStatus == .provisional
+        else { return }
+
+        let threshold = defaults.object(forKey: "peripheralAlertThreshold") as? Int ?? 20
+        let due = PeripheralAlertPolicy.due(
+            candidates: batteries.compactMap { battery in
+                battery.worstPercent.map {
+                    PeripheralAlertCandidate(id: battery.id, name: battery.name, worstPercent: $0)
+                }
+            },
+            threshold: threshold,
+            lastSent: peripheralLastSent,
+            now: .now
+        )
+        guard !due.isEmpty else { return }
+        for candidate in due {
+            peripheralLastSent[candidate.id] = .now
+            let content = UNMutableNotificationContent()
+            content.title = String(localized: "外设电量提醒")
+            content.body = String(
+                format: String(localized: "「%@」只剩 %@%%,该充电了。"),
+                candidate.name, String(describing: candidate.worstPercent)
+            )
+            center.add(UNNotificationRequest(
+                identifier: "peripheral.\(candidate.id).\(Int(Date().timeIntervalSince1970))",
+                content: content,
+                trigger: nil
+            ))
+        }
+        defaults.set(
+            peripheralLastSent.mapValues { $0.timeIntervalSince1970 },
+            forKey: "peripheralAlertLastSent"
+        )
+    }
+
     private func send(_ alert: String, snapshot: MetricSnapshot) {
         let content = UNMutableNotificationContent()
         content.sound = .default

@@ -1207,6 +1207,8 @@ struct SettingsView: View {
     @AppStorage("temperatureAlertsEnabled") private var temperatureAlertsEnabled = true
     @AppStorage("thermalAlertsEnabled") private var thermalAlertsEnabled = true
     @AppStorage("healthAlertsEnabled") private var healthAlertsEnabled = true
+    @AppStorage("peripheralAlertsEnabled") private var peripheralAlertsEnabled = true
+    @AppStorage("peripheralAlertThreshold") private var peripheralAlertThreshold = 20
     @AppStorage("alertCooldownMinutes") private var alertCooldownMinutes = 60.0
     @AppStorage("menuBarDisplayMode") private var menuBarDisplayMode = MenuBarDisplayMode.standard.rawValue
     @AppStorage("menuBarMetrics") private var menuBarMetrics = MenuBarMetric.defaultStorage
@@ -1352,6 +1354,19 @@ struct SettingsView: View {
                         Toggle(String(localized: "电池持续高温"), isOn: $temperatureAlertsEnabled)
                         Toggle(String(localized: "系统热压力"), isOn: $thermalAlertsEnabled)
                         Toggle(String(localized: "电池健康度低于 80%"), isOn: $healthAlertsEnabled)
+                        Toggle(isOn: $peripheralAlertsEnabled) {
+                            settingLabel(
+                                String(localized: "外设电量提醒"),
+                                String(format: String(localized: "AirPods、键鼠低于 %@%% 时提醒;同一设备 8 小时内只提醒一次"), String(describing: peripheralAlertThreshold)),
+                                "airpods"
+                            )
+                        }
+                        if peripheralAlertsEnabled {
+                            Slider(value: Binding(
+                                get: { Double(peripheralAlertThreshold) },
+                                set: { peripheralAlertThreshold = Int($0) }
+                            ), in: 10...40, step: 5)
+                        }
                         if !notificationsEnabled {
                             Text(String(localized: "本地提醒已关闭,以上规则暂不生效。"))
                                 .font(.caption2)
