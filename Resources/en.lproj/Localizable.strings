@@ -703,3 +703,11 @@
 "外设电量提醒" = "Peripheral battery alerts";
 "「%@」只剩 %@%%,该充电了。" = "“%@” is down to %@%% — time to charge it.";
 "AirPods、键鼠低于 %@%% 时提醒;同一设备 8 小时内只提醒一次" = "Alert when AirPods, keyboard or mouse drop below %@%%; each device alerts at most once every 8 hours";
+
+/* Editable home page */
+"「为什么卡」诊断" = "“Why is it slow?” diagnosis";
+"充电结论" = "Charging verdict";
+"芯片热点与功耗" = "Chip hotspot & power";
+"主页卡片" = "Home cards";
+"自己排你的头版" = "Arrange your own front page";
+"勾选显示哪些卡、用箭头调顺序。英雄卡与硬件警示条固定显示,不在此列。" = "Choose which cards show and reorder with the arrows. The hero card and hardware alerts are always shown and not listed here.";

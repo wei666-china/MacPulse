@@ -4,6 +4,52 @@ import MacPulseCore
 import SwiftUI
 import UserNotifications
 
+/// 总览页可编辑卡片。hero(身份)与警示条(安全)固定,其余用户自选。
+/// rawValue 是存储标识(英文,进 AppStorage),显示名走本地化。
+enum OverviewCard: String, CaseIterable, Identifiable {
+    case bottleneck
+    case powerVerdict
+    case consumers
+    case metricsGrid
+    case liveChart
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .bottleneck: String(localized: "「为什么卡」诊断")
+        case .powerVerdict: String(localized: "充电结论")
+        case .consumers: String(localized: "谁在耗电")
+        case .metricsGrid: String(localized: "芯片热点与功耗")
+        case .liveChart: String(localized: "实时能量")
+        }
+    }
+
+    /// 读当前布局:顺序 + 启用状态。新版本加的卡自动补在末尾(默认启用),
+    /// 老用户升级不丢新功能。
+    static func currentLayout() -> [(card: OverviewCard, enabled: Bool)] {
+        let defaults = UserDefaults.standard
+        let storedOrder = (defaults.string(forKey: "overviewCardOrder") ?? "")
+            .split(separator: ",").compactMap { OverviewCard(rawValue: String($0)) }
+        let hidden = Set((defaults.string(forKey: "overviewHiddenCards") ?? "")
+            .split(separator: ",").map(String.init))
+        var order = storedOrder
+        for card in OverviewCard.allCases where !order.contains(card) {
+            order.append(card)
+        }
+        return order.map { ($0, !hidden.contains($0.rawValue)) }
+    }
+
+    static func save(layout: [(card: OverviewCard, enabled: Bool)]) {
+        let defaults = UserDefaults.standard
+        defaults.set(layout.map(\.card.rawValue).joined(separator: ","), forKey: "overviewCardOrder")
+        defaults.set(
+            layout.filter { !$0.enabled }.map(\.card.rawValue).joined(separator: ","),
+            forKey: "overviewHiddenCards"
+        )
+    }
+}
+
 struct OverviewView: View {
     @EnvironmentObject private var model: DashboardModel
 
@@ -13,38 +59,21 @@ struct OverviewView: View {
     // 总览一屏答三件事:现在健康吗(英雄卡+警示条)、谁在耗电(进程 top3)、
     // 电源怎么样(插电时给充电结论)。CPU/内存宫格删了——那是性能页数字的
     // 复读,首屏每一格都该给出性能页给不了的「结论」。
+    /// 让视图跟着设置页的布局改动即时刷新(AppStorage 变化触发重渲染)。
+    @AppStorage("overviewCardOrder") private var overviewCardOrder = ""
+    @AppStorage("overviewHiddenCards") private var overviewHiddenCards = ""
+
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
                 hero
-                bottleneckCard
+                // 警示条不进可编辑清单:硬件报警不许被用户关掉后错过。
                 if let attention = attentionLine {
                     attentionCard(attention)
                 }
-                if snapshot.battery.powerSource == .external, let diagnosis = model.chargeLinkDiagnosis {
-                    powerVerdictCard(diagnosis)
+                ForEach(OverviewCard.currentLayout().filter(\.enabled).map(\.card)) { card in
+                    overviewCardView(card)
                 }
-                consumersCard
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                    MetricCard(
-                        title: String(localized: "芯片热点"),
-                        value: MetricFormat.temperature(snapshot.deep.hotspotTemperature),
-                        detail: snapshot.deep.thermalLevel.title,
-                        symbol: "thermometer.medium",
-                        tint: temperatureColor,
-                        progress: snapshot.deep.hotspotTemperature.map { $0 / 100 }
-                    )
-                    MetricCard(
-                        title: String(localized: "SoC 总功耗"),
-                        value: MetricFormat.watts(snapshot.deep.systemPowerWatts),
-                        // 有读数就别说「等待」:采集器状态标志在重启后有几秒滞后,
-                        // 以数据本身为准。
-                        detail: snapshot.deep.systemPowerWatts != nil ? String(localized: "SMC 实时读数") : String(localized: "等待采集器"),
-                        symbol: "bolt.horizontal.fill",
-                        tint: MacPulseTheme.plugged
-                    )
-                }
-                liveChart
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
@@ -55,6 +84,46 @@ struct OverviewView: View {
                     .padding(20)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
             }
+        }
+    }
+
+    @ViewBuilder
+    private func overviewCardView(_ card: OverviewCard) -> some View {
+        switch card {
+        case .bottleneck:
+            bottleneckCard
+        case .powerVerdict:
+            if snapshot.battery.powerSource == .external, let diagnosis = model.chargeLinkDiagnosis {
+                powerVerdictCard(diagnosis)
+            }
+        case .consumers:
+            consumersCard
+        case .metricsGrid:
+            metricsGrid
+        case .liveChart:
+            liveChart
+        }
+    }
+
+    private var metricsGrid: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            MetricCard(
+                title: String(localized: "芯片热点"),
+                value: MetricFormat.temperature(snapshot.deep.hotspotTemperature),
+                detail: snapshot.deep.thermalLevel.title,
+                symbol: "thermometer.medium",
+                tint: temperatureColor,
+                progress: snapshot.deep.hotspotTemperature.map { $0 / 100 }
+            )
+            MetricCard(
+                title: String(localized: "SoC 总功耗"),
+                value: MetricFormat.watts(snapshot.deep.systemPowerWatts),
+                // 有读数就别说「等待」:采集器状态标志在重启后有几秒滞后,
+                // 以数据本身为准。
+                detail: snapshot.deep.systemPowerWatts != nil ? String(localized: "SMC 实时读数") : String(localized: "等待采集器"),
+                symbol: "bolt.horizontal.fill",
+                tint: MacPulseTheme.plugged
+            )
         }
     }
 
@@ -1406,6 +1475,8 @@ struct SettingsView: View {
                     }
                 }
 
+                homeCardsEditor
+
                 healthReportCard
 
                 sensorCoverageCard
@@ -1516,6 +1587,58 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             syncLoginItemState()
             Task { await model.refreshNotificationAuthorization() }
+        }
+    }
+
+    /// 主页卡片编辑:开关 + 上下排序。hero 与警示条固定不进清单
+    /// (身份与硬件报警不许被藏);布局改动即时生效,总览页跟着重排。
+    @AppStorage("overviewCardOrder") private var overviewCardOrder = ""
+    @AppStorage("overviewHiddenCards") private var overviewHiddenCards = ""
+
+    private var homeCardsEditor: some View {
+        LiquidCard {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(title: String(localized: "主页卡片"), subtitle: String(localized: "自己排你的头版"))
+                Text(String(localized: "勾选显示哪些卡、用箭头调顺序。英雄卡与硬件警示条固定显示,不在此列。"))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                let layout = OverviewCard.currentLayout()
+                ForEach(Array(layout.enumerated()), id: \.element.card) { index, entry in
+                    HStack(spacing: 8) {
+                        Toggle(isOn: Binding(
+                            get: { entry.enabled },
+                            set: { enabled in
+                                var next = OverviewCard.currentLayout()
+                                next[index].enabled = enabled
+                                OverviewCard.save(layout: next)
+                                overviewHiddenCards = UserDefaults.standard.string(forKey: "overviewHiddenCards") ?? ""
+                            }
+                        )) {
+                            Text(entry.card.title).font(.callout)
+                        }
+                        Spacer(minLength: 0)
+                        Button {
+                            var next = OverviewCard.currentLayout()
+                            guard index > 0 else { return }
+                            next.swapAt(index, index - 1)
+                            OverviewCard.save(layout: next)
+                            overviewCardOrder = UserDefaults.standard.string(forKey: "overviewCardOrder") ?? ""
+                        } label: { Image(systemName: "chevron.up") }
+                        .buttonStyle(.borderless)
+                        .disabled(index == 0)
+                        Button {
+                            var next = OverviewCard.currentLayout()
+                            guard index < next.count - 1 else { return }
+                            next.swapAt(index, index + 1)
+                            OverviewCard.save(layout: next)
+                            overviewCardOrder = UserDefaults.standard.string(forKey: "overviewCardOrder") ?? ""
+                        } label: { Image(systemName: "chevron.down") }
+                        .buttonStyle(.borderless)
+                        .disabled(index == layout.count - 1)
+                    }
+                }
+            }
         }
     }
 
