@@ -64,6 +64,18 @@ final class HealthReportTests: XCTestCase {
         XCTAssertTrue(text.contains("不含序列号"), "隐私声明本身要在报告里")
     }
 
+    /// 瞬时瓶颈条目:notice 级(非警告、非 ok)要排在警告之后、ok 之前,
+    /// 且 markdown 里原样携带「诊断于 x 分钟前」的新鲜度标注。
+    func testBottleneckItemSortsAndRenders() {
+        let r = report(items: [
+            .init(level: .ok, category: "电池", summary: "100%"),
+            .init(level: .notice, category: "瞬时瓶颈", summary: "GPU 已被吃满(诊断于 3 分钟前)"),
+            .init(level: .warning, category: "内存", summary: "换页中")
+        ])
+        XCTAssertEqual(r.sortedItems.map(\.category), ["内存", "瞬时瓶颈", "电池"])
+        XCTAssertTrue(r.markdown().contains("诊断于 3 分钟前"))
+    }
+
     func testMarkdownIncludesEnvironmentHeader() {
         let text = report(items: []).markdown()
         XCTAssertTrue(text.contains("Apple M5"))

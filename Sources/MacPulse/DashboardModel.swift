@@ -1153,6 +1153,25 @@ final class DashboardModel: ObservableObject {
             missing.append(String(localized: "芯片温度"))
         }
 
+        // 瞬时瓶颈。报告的用途是外发求助,「我的机器为什么卡」正是求助的
+        // 第一句话——这是全 App 唯一能点名回答它的结论。60 分钟新鲜度门:
+        // 过期的瞬时结论比没有更误导,按缺失处理并教用户去哪重新生成。
+        if let last = lastBottleneck, Date().timeIntervalSince(last.at) < 3_600 {
+            let minutes = max(1, Int(Date().timeIntervalSince(last.at) / 60))
+            items.append(.init(
+                level: last.diagnosis.isWarning ? .warning
+                    : (last.diagnosis.kind == .noBottleneck ? .ok : .notice),
+                category: String(localized: "瞬时瓶颈"),
+                summary: String(
+                    format: String(localized: "%@(诊断于 %@ 分钟前)"),
+                    last.diagnosis.summary, String(describing: minutes)
+                ),
+                detail: last.diagnosis.isWarning ? last.diagnosis.detail : nil
+            ))
+        } else {
+            missing.append(String(localized: "瞬时瓶颈(在总览页点「为什么卡」后重新生成)"))
+        }
+
         // 睡眠掉电
         if let session = sleepSessions.first(where: { $0.onBattery }) {
             let verdict = SleepDiagnosis.diagnose(session)

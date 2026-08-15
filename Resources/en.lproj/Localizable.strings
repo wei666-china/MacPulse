@@ -678,3 +678,8 @@
 "刚刚" = "just now";
 "%@ 分钟前" = "%@ min ago";
 "%@ 小时前" = "%@ h ago";
+
+/* Bottleneck in health report */
+"瞬时瓶颈" = "Momentary bottleneck";
+"%@(诊断于 %@ 分钟前)" = "%@ (diagnosed %@ min ago)";
+"瞬时瓶颈(在总览页点「为什么卡」后重新生成)" = "Momentary bottleneck (tap “Why is it slow?” on Overview, then regenerate)";
