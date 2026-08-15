@@ -1267,15 +1267,18 @@ final class DashboardModel: ObservableObject {
             if let codex {
                 self.codexQuota = codex
                 QuotaSnapshotStore.save(codex)
+                QuotaSnapshotStore.appendHistory(codex)
             }
             // 429 等瞬时失败时保留上一次的好数据(带时间戳),不闪没。
             if let claude {
                 self.claudeQuota = claude
                 QuotaSnapshotStore.save(claude)
+                QuotaSnapshotStore.appendHistory(claude)
             }
             if let grok {
                 self.grokQuota = grok
                 QuotaSnapshotStore.save(grok)
+                QuotaSnapshotStore.appendHistory(grok)
             }
             self.aiBalanceRefreshedAt = .now
             self.aiBalanceRefreshInFlight = false

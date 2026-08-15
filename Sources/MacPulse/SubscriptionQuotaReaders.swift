@@ -18,6 +18,45 @@ enum QuotaSnapshotStore {
         guard let data = UserDefaults.standard.data(forKey: key(source)) else { return nil }
         return try? JSONDecoder().decode(SubscriptionQuota.self, from: data)
     }
+
+    // MARK: - 历史(给趋势用)
+
+    private static let historyKey = "quotaHistoryV1"
+    /// 一天最多留 24 个点(每小时一个),7 天上限 168 × 3 家。
+    private static let maxPoints = 520
+
+    struct Point: Codable, Sendable, Equatable {
+        var source: SubscriptionQuota.Source
+        var label: String
+        var remainingPercent: Double
+        var at: Date
+    }
+
+    static func appendHistory(_ quota: SubscriptionQuota) {
+        var points = loadHistory()
+        let now = Date()
+        for window in quota.windows {
+            // 每小时最多记一个点:额度是慢变量,高频记录只是把存储撑爆。
+            let recent = points.last { $0.source == quota.source && $0.label == window.label }
+            if let recent, now.timeIntervalSince(recent.at) < 3_600 { continue }
+            points.append(Point(
+                source: quota.source, label: window.label,
+                remainingPercent: window.remainingPercent, at: now
+            ))
+        }
+        let cutoff = now.addingTimeInterval(-7 * 86_400)
+        points = points.filter { $0.at >= cutoff }.suffix(maxPoints).map { $0 }
+        if let data = try? JSONEncoder().encode(points) {
+            UserDefaults.standard.set(data, forKey: historyKey)
+        }
+    }
+
+    static func loadHistory() -> [Point] {
+        guard let data = UserDefaults.standard.data(forKey: historyKey),
+              let points = try? JSONDecoder().decode([Point].self, from: data)
+        else { return [] }
+        return points
+    }
 }
 
 /// Codex 订阅额度:读最近的会话日志,取**最后一条** rate_limits 快照。

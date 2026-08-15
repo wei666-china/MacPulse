@@ -1,3 +1,4 @@
+import Charts
 import MacPulseCore
 import SwiftUI
 
@@ -14,6 +15,7 @@ struct AIView: View {
                 subscriptionSection
                 apiBalancesCard
                 localUsageCard
+                quotaTrendCard
                 privacyFootnote
             }
             .padding(.horizontal, 16)
@@ -314,6 +316,44 @@ struct AIView: View {
                     ))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+
+    /// 额度走势。每小时记一个点、留 7 天——额度是慢变量,
+    /// 曲线的价值在于「这周烧得比上周快吗」,不在秒级精度。
+    @ViewBuilder
+    private var quotaTrendCard: some View {
+        let points = QuotaSnapshotStore.loadHistory()
+        if points.count >= 3 {
+            LiquidCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionHeader(
+                        title: String(localized: "额度走势"),
+                        subtitle: String(format: String(localized: "近 7 天 · %@ 个采样点"), String(describing: points.count))
+                    )
+                    Chart(points, id: \.at) { point in
+                        LineMark(
+                            x: .value(String(localized: "时间"), point.at),
+                            y: .value(String(localized: "剩余"), point.remainingPercent),
+                            series: .value(String(localized: "来源"), "\(point.source.rawValue)·\(point.label)")
+                        )
+                        .foregroundStyle(by: .value(String(localized: "来源"), "\(point.source.rawValue)·\(point.label)"))
+                        .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                    }
+                    .chartYScale(domain: 0...100)
+                    .chartYAxis {
+                        AxisMarks(position: .leading, values: [0, 50, 100]) {
+                            AxisGridLine().foregroundStyle(.primary.opacity(0.06))
+                            AxisValueLabel()
+                        }
+                    }
+                    .chartLegend(.visible)
+                    .frame(height: 140)
+                    Text(String(localized: "纵轴是剩余百分比;每小时最多记一个点,不足三点时不画。"))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             }
         }
