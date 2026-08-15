@@ -1182,14 +1182,32 @@ final class DashboardModel: ObservableObject {
 
     // MARK: - AI 余额
 
+    /// 已配置的服务商。**必须在后台线程查**:钥匙串在签名不匹配时会弹
+    /// 授权对话框,而该调用是同步阻塞的——在主线程上查会把整个 App 冻住
+    /// (实测:AI 页一打开就 0% CPU 假死,直到有人点那个系统弹窗)。
     func reloadAIProviders() {
-        aiConfiguredProviders = AIKeyStore.configuredProviders
+        Task.detached(priority: .utility) {
+            let providers = AIKeyStore.configuredProviders
+            await MainActor.run { self.aiConfiguredProviders = providers }
+        }
+    }
+
+    /// Claude 登录态。同样后台查一次并缓存,视图只读缓存——
+    /// 在 body 里同步读钥匙串等于每次重绘都可能弹框+阻塞。
+    @Published private(set) var claudeTokenState: ClaudeSubscriptionReader.TokenState = .missing
+
+    func refreshClaudeTokenState() {
+        Task.detached(priority: .utility) {
+            let state = ClaudeSubscriptionReader.tokenState()
+            await MainActor.run { self.claudeTokenState = state }
+        }
     }
 
     /// 刷新余额与本地用量。非强制时 15 分钟节流——余额不是秒级数据,
     /// 高频轮询只是在骚扰服务商和费电。
     func refreshAIBalances(force: Bool = false) {
         reloadAIProviders()
+        refreshClaudeTokenState()
         if !force, let last = aiBalanceRefreshedAt,
            Date().timeIntervalSince(last) < 900 { return }
         guard !aiBalanceRefreshInFlight else { return }

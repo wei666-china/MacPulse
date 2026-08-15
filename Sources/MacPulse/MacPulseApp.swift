@@ -78,8 +78,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Dock 图标开关。默认显示(像 ChatGPT 那样是个能点开的正经 App);
     /// accessory 模式则回到纯菜单栏后台。
+    /// 上次应用过的策略。**必须记住**:App 会频繁写 UserDefaults
+    /// (提醒冷却、额度去重键、耗电档案……),而 didChangeNotification 对
+    /// 每一次写都触发。不做去重就等于每秒调用若干次 setActivationPolicy,
+    /// 实测把 App 卡死在 0% CPU、采样循环停摆、界面永远「连接中」。
+    private var appliedShowsDock: Bool?
+
     private func applyActivationPolicy() {
         let showsDock = UserDefaults.standard.object(forKey: "showsDockIcon") as? Bool ?? true
+        guard appliedShowsDock != showsDock else { return }
+        appliedShowsDock = showsDock
         NSApp.setActivationPolicy(showsDock ? .regular : .accessory)
     }
 

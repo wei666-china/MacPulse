@@ -70,7 +70,7 @@ actor ClaudeSubscriptionReader {
 
     /// 取 token 的结果。「被钥匙串拒绝」必须与「没登录」分开——
     /// 前者是一次授权就能解决的,后者要装 Claude Code,给用户的话完全不同。
-    enum TokenState {
+    enum TokenState: Sendable, Equatable {
         case token(String)
         /// 钥匙串里有,但本 App 没被授权读(系统会弹一次授权框)。
         case keychainDenied

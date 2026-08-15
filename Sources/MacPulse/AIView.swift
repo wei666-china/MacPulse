@@ -134,7 +134,7 @@ struct AIView: View {
                 String(describing: max(1, Int(delay / 60)))
             )
         }
-        switch ClaudeSubscriptionReader.tokenState() {
+        switch model.claudeTokenState {
         case .keychainDenied:
             return String(localized: "需要授权 MacPulse 读取 Claude Code 的钥匙串条目——首次刷新时系统会弹一次对话框,选「始终允许」即可长期生效。")
         case .missing:
