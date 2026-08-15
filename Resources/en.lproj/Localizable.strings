@@ -683,3 +683,11 @@
 "瞬时瓶颈" = "Momentary bottleneck";
 "%@(诊断于 %@ 分钟前)" = "%@ (diagnosed %@ min ago)";
 "瞬时瓶颈(在总览页点「为什么卡」后重新生成)" = "Momentary bottleneck (tap “Why is it slow?” on Overview, then regenerate)";
+
+/* Menu bar graphic slot */
+"菜单栏图形" = "Menu bar graphic";
+"文字左边那格:图标、功率走势图,或者干脆不要" = "The slot left of the text: an icon, a power sparkline, or nothing at all";
+"「仅图标」模式下不能选「不显示」,否则菜单栏项会变成空白" = "“None” is unavailable in icon-only mode — the menu bar item would be blank";
+"系统图标" = "System icon";
+"功率走势图" = "Power sparkline";
+"不显示" = "None";

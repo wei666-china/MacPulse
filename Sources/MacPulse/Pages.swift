@@ -1194,7 +1194,7 @@ struct SettingsView: View {
     @AppStorage("alertCooldownMinutes") private var alertCooldownMinutes = 60.0
     @AppStorage("menuBarDisplayMode") private var menuBarDisplayMode = MenuBarDisplayMode.standard.rawValue
     @AppStorage("menuBarMetrics") private var menuBarMetrics = MenuBarMetric.defaultStorage
-    @AppStorage("menuBarSparkline") private var menuBarSparkline = false
+    @AppStorage("menuBarGraphic") private var menuBarGraphic = ""
     @AppStorage("processMonitoringEnabled") private var processMonitoringEnabled = true
     @AppStorage("processHistoryEnabled") private var processHistoryEnabled = true
     @AppStorage("networkAutoRun") private var networkAutoRun = true
@@ -1270,8 +1270,30 @@ struct SettingsView: View {
                         if menuBarDisplayMode != MenuBarDisplayMode.iconOnly.rawValue {
                             menuBarMetricToggles
                         }
-                        Toggle(isOn: $menuBarSparkline) {
-                            settingLabel(String(localized: "菜单栏走势图"), String(localized: "用最近功率的火花线代替图标"), "waveform.path.ecg")
+                        HStack {
+                            settingLabel(
+                                String(localized: "菜单栏图形"),
+                                menuBarDisplayMode == MenuBarDisplayMode.iconOnly.rawValue
+                                    ? String(localized: "「仅图标」模式下不能选「不显示」,否则菜单栏项会变成空白")
+                                    : String(localized: "文字左边那格:图标、功率走势图,或者干脆不要"),
+                                "waveform.path.ecg"
+                            )
+                            Spacer(minLength: 12)
+                            Picker("", selection: Binding(
+                                get: {
+                                    menuBarGraphic.isEmpty
+                                        ? (UserDefaults.standard.bool(forKey: "menuBarSparkline") ? "sparkline" : "icon")
+                                        : menuBarGraphic
+                                },
+                                set: { menuBarGraphic = $0 }
+                            )) {
+                                Text(String(localized: "系统图标")).tag("icon")
+                                Text(String(localized: "功率走势图")).tag("sparkline")
+                                Text(String(localized: "不显示")).tag("hidden")
+                                    .disabled(menuBarDisplayMode == MenuBarDisplayMode.iconOnly.rawValue)
+                            }
+                            .labelsHidden()
+                            .frame(width: 122)
                         }
                         Divider()
                         Toggle(isOn: $launchAtLogin) {

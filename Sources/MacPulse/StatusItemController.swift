@@ -71,12 +71,25 @@ final class StatusItemController: NSObject, NSWindowDelegate {
         let defaults = UserDefaults.standard
         let mode = defaults.string(forKey: "menuBarDisplayMode") ?? MenuBarDisplayMode.standard.rawValue
 
-        // 迷你走势图:开了就用最近的实时功率画一条 28×16 的火花线代替图标,
-        // 一眼看出「刚才是不是有个尖峰」。关了走系统符号。
-        if defaults.bool(forKey: "menuBarSparkline"),
-           let spark = Self.sparklineImage(from: model.liveHistory) {
-            button.image = spark
-        } else {
+        // 图形位三档:系统图标 / 功率走势图 / 不显示(只留文字)。
+        // 旧的布尔开关 menuBarSparkline 迁移:true → sparkline。
+        // 「不显示」与「仅图标」模式互斥——两者都选会得到一个空白菜单栏项,
+        // 那种状态下强制回退到图标,宁可多显示也不消失。
+        let graphic = Self.effectiveGraphic(defaults: defaults, mode: mode)
+        switch graphic {
+        case "hidden":
+            button.image = nil
+        case "sparkline":
+            if let spark = Self.sparklineImage(from: model.liveHistory) {
+                button.image = spark
+            } else {
+                // 走势图暂时画不出(刚启动没数据)退回图标,不留空位。
+                button.image = NSImage(
+                    systemSymbolName: model.menuBarSymbol,
+                    accessibilityDescription: model.menuBarAccessibilityLabel
+                )
+            }
+        default:
             button.image = NSImage(
                 systemSymbolName: model.menuBarSymbol,
                 accessibilityDescription: model.menuBarAccessibilityLabel
@@ -97,6 +110,17 @@ final class StatusItemController: NSObject, NSWindowDelegate {
             )
             button.title = " " + text
         }
+    }
+
+    /// 图形位档位裁决:新键优先,缺省时从旧布尔开关迁移;
+    /// 「仅图标」模式下 hidden 无效(空白项),回退图标。
+    static func effectiveGraphic(defaults: UserDefaults, mode: String) -> String {
+        let stored = defaults.string(forKey: "menuBarGraphic")
+            ?? (defaults.bool(forKey: "menuBarSparkline") ? "sparkline" : "icon")
+        if stored == "hidden", mode == MenuBarDisplayMode.iconOnly.rawValue {
+            return "icon"
+        }
+        return stored
     }
 
     // MARK: - 迷你走势图
