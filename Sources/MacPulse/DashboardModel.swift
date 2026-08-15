@@ -94,6 +94,8 @@ final class DashboardModel: ObservableObject {
     /// Claude 订阅额度(未文档化接口,设置里明确开启才请求)。
     @Published private(set) var claudeQuota: SubscriptionQuota?
     private let claudeSubscriptionReader = ClaudeSubscriptionReader()
+    /// 被限流时距离可再试的秒数;界面据此显示「x 分钟后自动重试」。
+    @Published private(set) var claudeQuotaRetryDelay: TimeInterval?
     private let aiBalanceService = AIBalanceService()
     private var aiBalanceRefreshInFlight = false
 
@@ -108,6 +110,7 @@ final class DashboardModel: ObservableObject {
     /// 窗口攒满后进入「结账」等待:再触发一次进程采样并等它落账,
     /// 归因才有完整差分(新进程首拍没有基线,算不出 CPU%)。
     private var probeSettling = false
+    private var peripheralWatchTask: Task<Void, Never>?
     /// 进程数据的代号,processGroups 每次落账 +1。结账要等到「本代」数据,
     /// 不能固定睡 2 秒赌它到了——评审抓获:慢机上会拿旧榜单归因。
     private var processGeneration = 0
@@ -229,6 +232,9 @@ final class DashboardModel: ObservableObject {
         networkHistory = (try? openedNetworkStore?.loadRecent()) ?? []
         // 启动回填:最近一条历史当作当前结果展示(带时效标注,过期会置灰)。
         networkResult = networkHistory.last?.asResult()
+        // 额度快照回填:接口限流/日志缺失时,界面至少有「上次读到的」可看。
+        claudeQuota = QuotaSnapshotStore.load(.claude)
+        codexQuota = QuotaSnapshotStore.load(.codex)
         loadDrainProfile()
         backfillDrainProfileIfNeeded()
         estimateAccuracy = sessionTracker.accuracy()
@@ -650,6 +656,7 @@ final class DashboardModel: ObservableObject {
         }
         observer.start()
         pathObserver = observer
+        startPeripheralWatch()
 
         collector.start(sampleInterval: sampleInterval) { [weak self] deep, status in
             Task { @MainActor [weak self] in
@@ -726,6 +733,8 @@ final class DashboardModel: ObservableObject {
         samplerTask = nil
         processSamplerTask?.cancel()
         processSamplerTask = nil
+        peripheralWatchTask?.cancel()
+        peripheralWatchTask = nil
         collector.stop()
         collectorStatus = CollectorStatus(phase: .sleeping)
         processMonitorStatus.phase = .sleeping
@@ -733,6 +742,7 @@ final class DashboardModel: ObservableObject {
     }
 
     func resume() {
+        startPeripheralWatch()
         guard suspended else { return }
         suspended = false
         collector.start(sampleInterval: sampleInterval) { [weak self] deep, status in
@@ -832,7 +842,6 @@ final class DashboardModel: ObservableObject {
             guard let self else { return }
             self.chargeLink = await self.chargeLinkSampler.sample()
             self.peripheralBatteries = await self.peripheralReader.sample()
-            self.notifications.evaluatePeripherals(self.peripheralBatteries)
         }
         refreshSleepSessions()
     }
@@ -1165,11 +1174,12 @@ final class DashboardModel: ObservableObject {
         if !force, let last = aiBalanceRefreshedAt,
            Date().timeIntervalSince(last) < 900 { return }
         guard !aiBalanceRefreshInFlight else { return }
-        guard !aiConfiguredProviders.isEmpty || claudeCodeUsage == nil else {
-            // 没配任何服务商时只刷本地用量。
-            refreshClaudeCodeUsageOnly()
-            return
-        }
+        // 这里曾有一条「没配 key 就只刷本地用量」的短路,是评审抓获的 P0:
+        // 只用订阅、不配 API key 的用户(本 App 主画像)因此永远拿不到
+        // Claude/Codex 额度——开关打开后无限转圈,手动强刷也被吞掉,
+        // 且删掉最后一个 key 后旧余额继续顶着「刚刚更新」展示。
+        // 现在一律走全路径:providers 为空时循环体自然为空,成本只是
+        // 两个本地读取器,该刷的额度一次不落。
         aiBalanceRefreshInFlight = true
         let providers = aiConfiguredProviders
         Task { [weak self] in
@@ -1192,27 +1202,29 @@ final class DashboardModel: ObservableObject {
             var claude: SubscriptionQuota?
             if UserDefaults.standard.bool(forKey: "claudeSubscriptionEnabled") {
                 claude = await self.claudeSubscriptionReader.fetch()
+                // 拿不到就把「还要等多久」如实告诉界面,不让人对着转圈猜。
+                self.claudeQuotaRetryDelay = await self.claudeSubscriptionReader.retryDelay()
             }
             self.aiBalances = readings
             self.aiBalanceErrors = errors
             self.claudeCodeUsage = usage
-            self.codexQuota = codex
+            // 与 Claude 同规矩:读不到就保留上一次的好快照(带时间戳),
+            // 不闪没——新开 Codex 会话时最新文件还没写 rate_limits,
+            // 覆盖成 nil 会让整张卡消失。
+            if let codex {
+                self.codexQuota = codex
+                QuotaSnapshotStore.save(codex)
+            }
             // 429 等瞬时失败时保留上一次的好数据(带时间戳),不闪没。
-            if let claude { self.claudeQuota = claude }
+            if let claude {
+                self.claudeQuota = claude
+                QuotaSnapshotStore.save(claude)
+            }
             self.aiBalanceRefreshedAt = .now
             self.aiBalanceRefreshInFlight = false
         }
     }
 
-    private func refreshClaudeCodeUsageOnly() {
-        Task { [weak self] in
-            let usage = await Task.detached(priority: .utility) {
-                ClaudeCodeUsageReader.todayUsage()
-            }.value
-            self?.claudeCodeUsage = usage
-            self?.aiBalanceRefreshedAt = .now
-        }
-    }
 
     // MARK: - 跳转通道
 
@@ -1234,6 +1246,26 @@ final class DashboardModel: ObservableObject {
         throttleEvents.append(now)
         let cutoff = now.addingTimeInterval(-7 * 86_400)
         throttleEvents.removeAll { $0 < cutoff }
+    }
+
+    /// 外设低电量巡检。**不挂在电池页刷新上**——评审抓获:那样只有你
+    /// 正盯着电池页时才可能提醒,而低电量提醒的全部价值就在于你没在看。
+    /// 每 10 分钟独立采样一次,只在开关打开时跑。
+    private func startPeripheralWatch() {
+        peripheralWatchTask?.cancel()
+        peripheralWatchTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if UserDefaults.standard.object(forKey: "peripheralAlertsEnabled") as? Bool ?? true {
+                    let batteries = await self.peripheralReader.sample()
+                    if !batteries.isEmpty {
+                        self.peripheralBatteries = batteries
+                        self.notifications.evaluatePeripherals(batteries)
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 600_000_000_000)
+            }
+        }
     }
 
     /// 汇总全 App 的诊断结论,生成一页可外发的体检报告。
@@ -1553,7 +1585,6 @@ final class DashboardModel: ObservableObject {
         }
         if batteryPageActive {
             peripheralBatteries = await peripheralReader.sample()
-            notifications.evaluatePeripherals(peripheralBatteries)
             // 睡眠日志绝不能在这里 await:pmset 光是吐 13 万行就要 6 秒,
             // 而 refresh 全程持着重入闸——等它等于让所有实时数字冻住六到九秒。
             // 甩给独立任务,读取器自带 10 分钟节流,不会重复触发。

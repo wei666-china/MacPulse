@@ -93,7 +93,18 @@ struct RootView: View {
                     .padding(.top, 8)
             }
         }
-        .frame(width: 520, height: 760)
+        // 菜单栏弹窗是固定尺寸(弹窗本来就该是定值);独立窗口跟随用户
+        // 拖拽——写死 520×760 会和可缩放窗口打架,内容被切在窗外。
+        // 菜单栏弹窗固定尺寸;独立窗口给出 min/ideal/max 三档——
+        // 只给 maxWidth 会让 NSHostingController 用内容的理想宽度
+        // 撑出窗口边界(实测右侧被切)。
+        // 弹窗固定尺寸;窗口态填满窗口(尺寸由 NSWindow 决定,
+        // hosting 的 sizingOptions 已关掉反向传播)。
+        .frame(
+            width: presentation == .menuBar ? 520 : nil,
+            height: presentation == .menuBar ? 760 : nil
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         // 系统控件(分段选择器/开关/按钮)统一石墨色:
         // 默认的系统蓝在单色仪表里是最扎眼的杂色。
         .tint(.primary)
@@ -115,6 +126,12 @@ struct RootView: View {
             if let raw = UserDefaults.standard.string(forKey: "MacPulseOpenSection"),
                let target = AppSection(rawValue: raw) {
                 section = target
+            }
+        }
+        .onChange(of: hiddenSectionsRaw) { _, _ in
+            // 用户把自己正停留的板块藏了:页面不能悬空,退回总览。
+            if !AppSection.visibleSections.contains(section) {
+                section = .overview
             }
         }
         .onChange(of: model.navigationRequest) { _, request in

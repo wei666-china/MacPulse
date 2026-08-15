@@ -53,13 +53,25 @@ struct AIView: View {
                 }
             }
         } else {
+            // 开着但暂时没数据。三种情形分开说,并给出口——转圈不许无限期。
             LiquidCard(padding: 12) {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text(String(localized: "Claude 订阅额度读取中……接口繁忙时会稍等下一轮"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: model.claudeQuotaRetryDelay != nil ? "clock.badge.exclamationmark" : "hourglass")
+                        .foregroundStyle(MacPulseTheme.warm)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(localized: "Claude 订阅额度暂时读不到"))
+                            .font(.caption.weight(.medium))
+                        Text(claudeUnavailableReason)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Spacer(minLength: 0)
+                    Button(String(localized: "关闭")) {
+                        claudeSubscriptionEnabled = false
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
                 }
             }
         }
@@ -72,6 +84,20 @@ struct AIView: View {
                 quota: codex
             )
         }
+    }
+
+    /// 读不到的具体原因。限流是最常见的一种,而且服务端明确告诉了要等多久。
+    private var claudeUnavailableReason: String {
+        if let delay = model.claudeQuotaRetryDelay {
+            return String(
+                format: String(localized: "接口正在限流,%@ 分钟后自动重试。这个接口每小时只允许很少几次查询。"),
+                String(describing: max(1, Int(delay / 60)))
+            )
+        }
+        if ClaudeSubscriptionReader.loadToken() == nil {
+            return String(localized: "本机没找到 Claude Code 的登录态。装好并登录 Claude Code 后即可读取。")
+        }
+        return String(localized: "正在读取,下一轮刷新后显示。")
     }
 
     private func quotaCard(title: String, subtitle: String, quota: SubscriptionQuota) -> some View {

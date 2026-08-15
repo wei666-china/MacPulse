@@ -102,6 +102,9 @@ final class NotificationService {
                 format: String(localized: "「%@」只剩 %@%%,该充电了。"),
                 candidate.name, String(describing: candidate.worstPercent)
             )
+            // 与温度/健康度提醒同规格:静默横幅在离屏时等于没提醒,
+            // 而 8 小时冷却保证不会再响第二次。
+            content.sound = .default
             center.add(UNNotificationRequest(
                 identifier: "peripheral.\(candidate.id).\(Int(Date().timeIntervalSince1970))",
                 content: content,

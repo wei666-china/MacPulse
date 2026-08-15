@@ -10,6 +10,7 @@ public enum AIProvider: String, CaseIterable, Codable, Sendable, Identifiable {
     case openrouter
     case moonshot
     case siliconflow
+    case xai
 
     public var id: String { rawValue }
 
@@ -19,6 +20,7 @@ public enum AIProvider: String, CaseIterable, Codable, Sendable, Identifiable {
         case .openrouter: "OpenRouter"
         case .moonshot: "Moonshot (Kimi)"
         case .siliconflow: String(localized: "硅基流动")
+        case .xai: "xAI (Grok)"
         }
     }
 
@@ -29,6 +31,10 @@ public enum AIProvider: String, CaseIterable, Codable, Sendable, Identifiable {
         case .openrouter: URL(string: "https://openrouter.ai/api/v1/key")!
         case .moonshot: URL(string: "https://api.moonshot.cn/v1/users/me/balance")!
         case .siliconflow: URL(string: "https://api.siliconflow.cn/v1/user/info")!
+        // xAI 官方没有余额端点(2026-08 调研);这个端点返回 key 的状态与
+        // 权限,能答的是「这把 key 还能不能用、被封没有」——如实只报这个,
+        // 不假装能查钱。控制台才有账单。
+        case .xai: URL(string: "https://api.x.ai/v1/api-key")!
         }
     }
 }
@@ -66,6 +72,7 @@ public enum AIBalanceParser {
         case .openrouter: try parseOpenRouter(data, now: now)
         case .moonshot: try parseMoonshot(data, now: now)
         case .siliconflow: try parseSiliconFlow(data, now: now)
+        case .xai: try parseXAI(data, now: now)
         }
     }
 
@@ -165,6 +172,27 @@ public enum AIBalanceParser {
     }
 }
 
+extension AIBalanceParser {
+    // xAI /v1/api-key: {"redacted_api_key":"xa..7f","name":"key",
+    //   "api_key_blocked":false,"api_key_disabled":false,"team_blocked":false,
+    //   "acls":["api-key:model:*"],...}
+    // 官方无余额字段——只报可用状态,并在 detail 里说明去哪看钱。
+    static func parseXAI(_ data: Data, now: Date) throws -> AIBalanceReading {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              root["redacted_api_key"] != nil || root["api_key_id"] != nil
+        else { throw AIBalanceParseError.unexpectedShape("redacted_api_key") }
+        let blocked = (root["api_key_blocked"] as? Bool ?? false)
+            || (root["api_key_disabled"] as? Bool ?? false)
+            || (root["team_blocked"] as? Bool ?? false)
+        return AIBalanceReading(
+            provider: .xai,
+            primary: blocked ? String(localized: "已停用") : String(localized: "可用"),
+            detail: String(localized: "xAI 未提供余额接口,金额请看 console.x.ai"),
+            fetchedAt: now
+        )
+    }
+}
+
 /// Claude Code 本地用量汇总(零网络、零配置——思路致谢 ccusage,MIT)。
 /// 只统计 token,不估算费用:价格表会过期,过期的估价是编数据。
 public struct ClaudeCodeUsage: Sendable, Equatable {
@@ -249,7 +277,7 @@ extension ISO8601DateFormatter {
 
 /// 一个订阅限额窗口(如「5 小时窗」「每周」)。
 /// 存 used,显示层算 remaining——Wei 的要求:主角是「还剩多少」。
-public struct QuotaWindow: Sendable, Equatable, Identifiable {
+public struct QuotaWindow: Sendable, Equatable, Identifiable, Codable {
     public var label: String
     public var usedPercent: Double
     public var resetsAt: Date?
@@ -264,8 +292,8 @@ public struct QuotaWindow: Sendable, Equatable, Identifiable {
     public var remainingPercent: Double { max(0, 100 - usedPercent) }
 }
 
-public struct SubscriptionQuota: Sendable, Equatable {
-    public enum Source: String, Sendable {
+public struct SubscriptionQuota: Sendable, Equatable, Codable {
+    public enum Source: String, Sendable, Codable {
         case claude
         case codex
     }

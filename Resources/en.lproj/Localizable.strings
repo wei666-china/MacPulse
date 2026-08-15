@@ -771,3 +771,13 @@
 "用本机 Claude Code 的登录态查 5 小时窗与每周额度。走的是未公开接口,可能随时失效;开启才请求。" = "Uses this Mac's Claude Code login to read the 5-hour and weekly quotas. Undocumented endpoint that may break at any time; nothing is requested until you turn this on.";
 "读本机会话日志,零网络" = "read from local session logs, zero network";
 "额度窗" = "Quota window";
+"Claude 订阅额度读取中" = "Reading Claude subscription quota";
+"接口繁忙(限流)时要等下一轮刷新;若本机没登录 Claude Code 则一直读不到,可关掉此项。" = "A busy (rate-limited) endpoint waits for the next refresh; if Claude Code isn't signed in on this Mac it will never load — you can turn this off.";
+"关闭" = "Turn off";
+"已停用" = "Disabled";
+"可用" = "Active";
+"xAI 未提供余额接口,金额请看 console.x.ai" = "xAI exposes no balance endpoint; see console.x.ai for the amount";
+"Claude 订阅额度暂时读不到" = "Claude subscription quota unavailable right now";
+"接口正在限流,%@ 分钟后自动重试。这个接口每小时只允许很少几次查询。" = "The endpoint is rate-limited; retrying automatically in %@ min. It only allows a few queries per hour.";
+"本机没找到 Claude Code 的登录态。装好并登录 Claude Code 后即可读取。" = "No Claude Code login found on this Mac. Install and sign in to Claude Code to read the quota.";
+"正在读取,下一轮刷新后显示。" = "Reading; it will appear after the next refresh.";

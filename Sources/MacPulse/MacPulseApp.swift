@@ -57,15 +57,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusController: StatusItemController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        // 双形态:Dock 里是正经 App(有图标、能从启动台打开、⌘Tab 切得到),
+        // 同时常驻菜单栏。想要纯后台的用户可在设置里关掉 Dock 图标。
+        applyActivationPolicy()
         DashboardModel.shared.start()
         statusController = StatusItemController()
         observeSleepAndWake()
+        observeDockPreference()
 
-        if !UserDefaults.standard.bool(forKey: "MacPulse.hasShownDashboard") {
+        // Dock 模式下点开就该有窗口(像任何正经 Mac App);纯菜单栏模式
+        // 只在首次运行时开一次,之后靠点菜单栏图标。
+        let showsDock = UserDefaults.standard.object(forKey: "showsDockIcon") as? Bool ?? true
+        if showsDock || !UserDefaults.standard.bool(forKey: "MacPulse.hasShownDashboard") {
             showDashboardWindow()
             UserDefaults.standard.set(true, forKey: "MacPulse.hasShownDashboard")
         }
+    }
+
+    /// Dock 图标开关。默认显示(像 ChatGPT 那样是个能点开的正经 App);
+    /// accessory 模式则回到纯菜单栏后台。
+    private func applyActivationPolicy() {
+        let showsDock = UserDefaults.standard.object(forKey: "showsDockIcon") as? Bool ?? true
+        NSApp.setActivationPolicy(showsDock ? .regular : .accessory)
+    }
+
+    private func observeDockPreference() {
+        let observer = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyActivationPolicy() }
+        }
+        windowObservers.append(observer)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -91,22 +115,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // 独立窗口可缩放:正经 App 该让人拉大看(菜单栏弹窗保持固定尺寸)。
         let rootView = RootView(presentation: .window)
             .environmentObject(DashboardModel.shared)
-            .frame(width: 520, height: 760)
-        let hostingController = NSHostingController(rootView: rootView)
+        // 用 NSHostingView 而不是 NSHostingController:
+        // 把 controller 的 view 挂到 window.contentView 上时没人持有
+        // controller,它随即释放、视图连同窗口一起塌成 0×0(实测 6 个
+        // 0×0 窗口)。NSHostingView 是自包含的,窗口持有它即可。
+        let hostingView = NSHostingView(rootView: rootView)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 760),
-            styleMask: [.titled, .closable, .miniaturizable],
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 800),
+            // fullSizeContentView 显式声明:玻璃面板要一直画到标题栏下面,
+            // 不声明时行为随系统版本漂移(实测出现过内容压住红绿灯)。
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
+        window.minSize = NSSize(width: 460, height: 620)
         window.title = "MacPulse"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
-        window.contentViewController = hostingController
+        // 尺寸主权归窗口:挂 contentView 而不是 contentViewController。
+        // 走 contentViewController 时 AppKit 会按 preferredContentSize 定尺寸,
+        // 而 sizingOptions=[] 让它恒为 .zero → 窗口被压成 0×0(实测);
+        // 保留默认 sizingOptions 又会让内容的最小尺寸反推窗口成 460×652、
+        // 右侧内容被切。直接挂 view + autoresizing 两个坑都绕开。
+        hostingView.frame = NSRect(x: 0, y: 0, width: 560, height: 800)
+        hostingView.autoresizingMask = [.width, .height]
+        window.contentView = hostingView
+        // 显式定尺寸并关掉窗口状态恢复:实测出现过系统记住早前一次异常的
+        // 460×652 并每次还原,内容被切在窗外。窗口尺寸由代码说了算。
+        window.setContentSize(NSSize(width: 560, height: 800))
+        window.isRestorable = false
         window.center()
         // 先落 dashboardWindow 再注册观察者：观察回调会回读这个属性。
         dashboardWindow = window

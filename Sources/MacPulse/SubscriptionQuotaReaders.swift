@@ -2,6 +2,24 @@ import Foundation
 import MacPulseCore
 import Security
 
+/// 额度快照的落盘。接口限流严、日志偶尔缺,所以最近一次好数据必须留住——
+/// 界面显示「1 小时前的快照」远好过显示空白(空白让人以为功能坏了)。
+enum QuotaSnapshotStore {
+    private static func key(_ source: SubscriptionQuota.Source) -> String {
+        "quotaSnapshot.\(source.rawValue)"
+    }
+
+    static func save(_ quota: SubscriptionQuota) {
+        guard let data = try? JSONEncoder().encode(quota) else { return }
+        UserDefaults.standard.set(data, forKey: key(quota.source))
+    }
+
+    static func load(_ source: SubscriptionQuota.Source) -> SubscriptionQuota? {
+        guard let data = UserDefaults.standard.data(forKey: key(source)) else { return nil }
+        return try? JSONDecoder().decode(SubscriptionQuota.self, from: data)
+    }
+}
+
 /// Codex 订阅额度:读最近的会话日志,取**最后一条** rate_limits 快照。
 /// 零网络——Codex CLI 自己把额度写进 ~/.codex/sessions 的 rollout JSONL。
 enum CodexQuotaReader {
@@ -77,15 +95,35 @@ actor ClaudeSubscriptionReader {
         return oauth["accessToken"] as? String
     }
 
+    /// 上次被限流时服务端要求的最早重试时刻。这个接口限流极严
+    /// (实测 429 带 retry-after 2410 秒),不尊重它就是自找永远 429。
+    private var retryAfter: Date?
+
+    /// 距离可以再试还有多久;nil 表示现在就能试。
+    func retryDelay(now: Date = .now) -> TimeInterval? {
+        guard let retryAfter, retryAfter > now else { return nil }
+        return retryAfter.timeIntervalSince(now)
+    }
+
     func fetch() async -> SubscriptionQuota? {
+        if let retryAfter, retryAfter > Date() { return nil }
         guard let token = Self.loadToken() else { return nil }
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.setValue("MacPulse", forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await session.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200
+              let http = response as? HTTPURLResponse
         else { return nil }
+        if http.statusCode == 429 {
+            // 服务端说了等多久就等多久,再加 60 秒缓冲。
+            let seconds = (http.value(forHTTPHeaderField: "retry-after")
+                .flatMap(Double.init)) ?? 1800
+            retryAfter = Date().addingTimeInterval(seconds + 60)
+            return nil
+        }
+        guard http.statusCode == 200 else { return nil }
+        retryAfter = nil
         return ClaudeSubscriptionParser.parse(data: data, now: .now)
     }
 }

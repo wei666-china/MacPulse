@@ -35,7 +35,12 @@ enum OverviewCard: String, CaseIterable, Identifiable {
             .split(separator: ",").compactMap { OverviewCard(rawValue: String($0)) }
         let hidden = Set((defaults.string(forKey: "overviewHiddenCards") ?? "")
             .split(separator: ",").map(String.init))
-        var order = storedOrder
+        // 去重:外部写坏(defaults write / 迁移损坏)会让同一张卡出现两次,
+        // 造成 SwiftUI 重复 ID(未定义行为)且按 index 的排序操作错位。
+        var order: [OverviewCard] = []
+        for card in storedOrder where !order.contains(card) {
+            order.append(card)
+        }
         for card in OverviewCard.allCases where !order.contains(card) {
             order.append(card)
         }
